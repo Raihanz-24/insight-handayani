@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Sso;
 
 use App\Services\Sso\SsoClientService;
+use App\Services\Sso\SsoException;
 use App\Services\Sso\UserLinkResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use RuntimeException;
 
 /**
  * GET /sso/callback — menerima `code` + `state` dari Portal, menukar code
@@ -50,7 +50,7 @@ class SsoCallbackController
         if (! is_string($state) || $expectedState === null || ! hash_equals((string) $expectedState, $state)) {
             Log::warning('sso.callback.state_mismatch', ['ip' => $request->ip()]);
 
-            return $this->fail('Permintaan SSO tidak valid (state). Silakan coba lagi.');
+            return $this->fail('Permintaan SSO tidak valid (state tidak cocok). Pastikan cookie/sesi browser aktif, lalu coba lagi.');
         }
 
         // Kedaluwarsa: state/verifier hanya berlaku `sso.state_ttl` detik sejak
@@ -59,7 +59,7 @@ class SsoCallbackController
         if ($ttl > 0 && (! is_int($startedAt) && ! is_numeric($startedAt) || (time() - (int) $startedAt) > $ttl)) {
             Log::warning('sso.callback.state_expired', ['ip' => $request->ip()]);
 
-            return $this->fail('Sesi SSO kedaluwarsa. Silakan coba lagi.');
+            return $this->fail('Sesi SSO kedaluwarsa (terlalu lama di halaman Portal). Silakan coba masuk lagi.');
         }
 
         if (! is_string($code) || $code === '' || ! is_string($codeVerifier) || $codeVerifier === '') {
@@ -68,10 +68,15 @@ class SsoCallbackController
 
         try {
             $identity = $sso->exchangeCode($code, $codeVerifier);
-        } catch (RuntimeException $e) {
-            Log::warning('sso.callback.exchange_failed', ['ip' => $request->ip()]);
+        } catch (SsoException $e) {
+            // Catat SEBAB aman (reason + status HTTP), tanpa secret/token.
+            Log::warning('sso.callback.exchange_failed', [
+                'ip' => $request->ip(),
+                'reason' => $e->reason,
+                'status' => $e->httpStatus,
+            ]);
 
-            return $this->fail('Gagal memverifikasi SSO. Silakan masuk manual atau coba lagi.');
+            return $this->fail($e->userMessage());
         }
 
         if (($identity['status'] ?? 'inactive') !== 'active') {

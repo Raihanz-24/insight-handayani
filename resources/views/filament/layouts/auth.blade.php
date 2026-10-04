@@ -297,6 +297,28 @@
             line-height: 1.5;
         }
 
+        .ha-sso-gate__error {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            text-align: left;
+            padding: 0.7rem 0.85rem;
+            border-radius: 0.6rem;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #b91c1c;
+            font-size: 0.82rem;
+            line-height: 1.45;
+            margin: 0 0 1.25rem;
+        }
+
+        .ha-sso-gate__error svg {
+            width: 1.1rem;
+            height: 1.1rem;
+            flex-shrink: 0;
+            margin-top: 0.1rem;
+        }
+
         .ha-sso-gate__button {
             display: inline-flex;
             align-items: center;

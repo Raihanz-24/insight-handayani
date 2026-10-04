@@ -139,6 +139,13 @@
                     Silakan masuk menggunakan akun Portal Handayani Anda.
                 </p>
 
+                @if (filled($this->ssoErrorMessage))
+                    <div class="ha-sso-gate__error" role="alert">
+                        <x-filament::icon icon="heroicon-m-exclamation-triangle" />
+                        <span>{{ $this->ssoErrorMessage }}</span>
+                    </div>
+                @endif
+
                 <a
                     class="ha-sso-gate__button"
                     href="{{ route('sso.login') }}"

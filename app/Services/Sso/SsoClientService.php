@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services\Sso;
 
 use Illuminate\Support\Facades\Http;
-use RuntimeException;
 
 /**
  * Klien HTTP ke Authorization Server Portal (Opsi B).
@@ -42,7 +41,7 @@ class SsoClientService
      *
      * @return array{portal_uuid: string, email: ?string, status: string}
      *
-     * @throws RuntimeException bila gagal (pesan generik, tanpa bocorkan detail).
+     * @throws SsoException bila gagal (membawa `reason` aman untuk log & UI).
      */
     public function exchangeCode(string $code, string $codeVerifier): array
     {
@@ -61,14 +60,26 @@ class SsoClientService
             ]);
 
         if (! $response->successful()) {
-            // JANGAN log body — bisa memuat detail. Pesan generik saja.
-            throw new RuntimeException('Penukaran kode SSO gagal.');
+            // Ambil HANYA kode error Portal (mis. invalid_client, invalid_grant).
+            // JANGAN log body mentah — bisa memuat detail/token.
+            $error = $this->safeErrorCode($response->json());
+
+            throw new SsoException(
+                message: 'Penukaran kode SSO gagal ('.$error.').',
+                reason: $error,
+                httpStatus: $response->status(),
+            );
         }
 
         $data = $response->json();
 
         if (! is_array($data) || ! isset($data['portal_uuid'])) {
-            throw new RuntimeException('Respons SSO tidak valid.');
+            // Respons sukses tapi tanpa identitas → anggap gagal tak terduga.
+            throw new SsoException(
+                message: 'Respons SSO tidak valid (tanpa portal_uuid).',
+                reason: 'invalid_response',
+                httpStatus: $response->status(),
+            );
         }
 
         return [
@@ -76,6 +87,25 @@ class SsoClientService
             'email' => isset($data['email']) ? (string) $data['email'] : null,
             'status' => (string) ($data['status'] ?? 'inactive'),
         ];
+    }
+
+    /**
+     * Ambil kode error dari respons Portal dengan aman.
+     *
+     * Hanya menerima token pendek [a-z0-9_] (mis. invalid_client). Bila tidak
+     * sesuai bentuknya, kembalikan kode generik + status HTTP.
+     */
+    private function safeErrorCode(mixed $json): string
+    {
+        $candidate = is_array($json)
+            ? (string) ($json['error'] ?? '')
+            : '';
+
+        if ($candidate !== '' && preg_match('/^[a-z0-9_]{1,40}$/', $candidate) === 1) {
+            return $candidate;
+        }
+
+        return 'unknown';
     }
 
     /**
@@ -103,7 +133,7 @@ class SsoClientService
      * Pastikan transport ke Portal memakai HTTPS (kecuali lingkungan lokal/
      * testing). Mencegah client_secret + code + verifier terkirim via cleartext.
      *
-     * @throws RuntimeException
+     * @throws SsoException
      */
     private function assertSecureTransport(): void
     {
@@ -118,8 +148,9 @@ class SsoClientService
             return;
         }
 
-        throw new RuntimeException(
-            'SSO memerlukan HTTPS pada SSO_PORTAL_BASE_URL di lingkungan non-lokal.'
+        throw new SsoException(
+            message: 'SSO memerlukan HTTPS pada SSO_PORTAL_BASE_URL di lingkungan non-lokal.',
+            reason: 'insecure_transport',
         );
     }
 }

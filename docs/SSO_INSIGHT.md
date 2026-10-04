@@ -120,3 +120,24 @@ langsung aktif kembali — tidak ada user yang terkunci.
 - SSO memerlukan **HTTPS** di lingkungan non-lokal (dijaga di `SsoClientService`).
 - `state` divalidasi satu kali pakai (cegah CSRF/replay) + TTL.
 - Tidak ada `portal_uuid` tak dikenal → **ditolak** (tanpa auto-create).
+- Log `exchange_failed` hanya mencatat **kode error Portal** (`reason`) +
+  status HTTP — **tidak pernah** secret/token/body mentah.
+
+## Mengatasi kegagalan SSO (diagnostik)
+
+Pesan penyebab kini tampil **di dalam popup** pada halaman login. Untuk detail,
+lihat log:
+
+```bash
+tail -n 30 storage/logs/laravel.log
+```
+
+| Kode `reason` di log | Arti | Tindakan |
+|---|---|---|
+| `invalid_client` | `client_id`/`client_secret` ditolak Portal | Samakan dengan Portal → Aplikasi |
+| `invalid_grant` | Code kedaluwarsa/sudah dipakai | Coba login lagi |
+| `redirect_uri_mismatch` | Redirect URI beda dgn Portal | Samakan persis (`https`, tanpa `/` akhir) |
+| `access_denied` | User tanpa Hak Akses | Beri **Hak Akses** di Portal |
+| `sso.callback.unlinked` | `portal_uuid` Insight ≠ Portal | Samakan via `sso:assign-uuid --uuid=...` |
+| `sso.callback.state_mismatch` | Cookie/sesi tidak terbawa | Cek `APP_URL`/`SESSION_DOMAIN`, coba mode incognito |
+| `sso.callback.state_expired` | Terlalu lama di Portal | Coba masuk lagi |

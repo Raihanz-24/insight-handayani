@@ -40,16 +40,28 @@ class Login extends BaseLogin
 
     public ?string $loginErrorMessage = null;
 
+    /**
+     * Pesan error spesifik dari callback SSO (ditampilkan di dalam popup).
+     */
+    public ?string $ssoErrorMessage = null;
+
     public function mount(): void
     {
         if (Filament::auth()->check()) {
             redirect()->intended(Filament::getUrl());
         }
 
-        // Tampilkan pesan dari callback SSO (bila ada) sekali saja.
+        // Pesan dari callback SSO (bila ada) — ditampilkan di dalam popup SSO
+        // supaya penyebab kegagalan terlihat jelas (tidak tertutup overlay).
         $ssoError = session()->pull('sso_error');
         if (is_string($ssoError) && $ssoError !== '') {
-            $this->loginErrorMessage = $ssoError;
+            $this->ssoErrorMessage = $ssoError;
+
+            // Bila SSO sedang OFF (mis. rollback), tetap tampilkan sebagai
+            // pesan login biasa supaya tidak hilang.
+            if (! config('sso.enabled')) {
+                $this->loginErrorMessage = $ssoError;
+            }
         }
 
         $this->data = [
