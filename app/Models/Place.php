@@ -44,6 +44,9 @@ class Place extends Model
         'schedule_interval_days',
         'schedule_hour',
         'last_synced_at',
+        'reviews_synced',
+        'oldest_review_date',
+        'newest_review_date',
         'note',
     ];
 
@@ -56,6 +59,9 @@ class Place extends Model
             'schedule_interval_days' => 'integer',
             'schedule_hour' => 'integer',
             'last_synced_at' => 'datetime',
+            'reviews_synced' => 'integer',
+            'oldest_review_date' => 'date',
+            'newest_review_date' => 'date',
         ];
     }
 
@@ -137,6 +143,38 @@ class Place extends Model
     public function snapshots(): HasMany
     {
         return $this->hasMany(RatingSnapshot::class);
+    }
+
+    /** @return HasMany<Review> */
+    public function reviews(): HasMany
+    {
+        return $this->hasMany(Review::class);
+    }
+
+    /**
+     * Distribusi bintang (jumlah review per bintang 1..5) pada rentang tanggal.
+     *
+     * @return array<int, int> [5 => n, 4 => n, 3 => n, 2 => n, 1 => n]
+     */
+    public function ratingDistribution(\DateTimeInterface|string|null $from = null, \DateTimeInterface|string|null $to = null): array
+    {
+        $query = $this->reviews();
+
+        if ($from !== null && $to !== null) {
+            $query->betweenDates($from, $to);
+        }
+
+        $rows = $query->selectRaw('rating, COUNT(*) as total')
+            ->groupBy('rating')
+            ->pluck('total', 'rating')
+            ->all();
+
+        $out = [];
+        for ($star = 5; $star >= 1; $star--) {
+            $out[$star] = (int) ($rows[$star] ?? 0);
+        }
+
+        return $out;
     }
 
     /** Snapshot terbaru (yang berhasil) untuk tempat ini. */

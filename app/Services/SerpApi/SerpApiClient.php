@@ -124,6 +124,121 @@ class SerpApiClient
     }
 
     /**
+     * Ambil daftar review berhalaman untuk sebuah tempat.
+     *
+     * Mengembalikan review + info ulasan. Berhenti lebih awal bila:
+     *  - mencapai `maxPages`,
+     *  - halaman tidak punya token lanjutan,
+     *  - `stopBeforeDate` diisi & halaman sudah memuat review lebih tua dari itu
+     *    (berguna dengan sort_by=newestFirst agar hemat kuota).
+     *
+     * @param  callable(int $cost): void|null  $onSearch
+     * @return array{success: bool, reviews: array<int, array<string, mixed>>, place_info: ?array<string, mixed>, pages_fetched: int, error: ?string}
+     */
+    public function fetchReviews(
+        ?string $dataId = null,
+        ?string $placeId = null,
+        int $maxPages = 1,
+        string $sortBy = 'newestFirst',
+        ?callable $onSearch = null,
+        ?string $stopBeforeDate = null,
+    ): array {
+        if (! $this->isConfigured()) {
+            return $this->reviewsResult(false, [], null, 0, 'SERPAPI_KEY belum diatur.');
+        }
+
+        if (blank($dataId) && blank($placeId)) {
+            return $this->reviewsResult(false, [], null, 0, 'Tempat belum punya data_id/place_id.');
+        }
+
+        $pages = 0;
+        $all = [];
+        $placeInfo = null;
+        $token = null;
+
+        try {
+            do {
+                $params = [
+                    'engine' => $this->engine,
+                    'api_key' => $this->apiKey,
+                    'hl' => $this->hl,
+                    'gl' => $this->gl,
+                    'sort_by' => $sortBy,
+                ];
+
+                if (filled($dataId)) {
+                    $params['data_id'] = $dataId;
+                } else {
+                    $params['place_id'] = $placeId;
+                }
+
+                if ($token !== null) {
+                    $params['next_page_token'] = $token;
+                }
+
+                $response = $this->request($params);
+                $pages++;
+                $onSearch?->__invoke(1);
+
+                $json = $response->json() ?? [];
+
+                if ($response->failed()) {
+                    return $this->reviewsResult(false, $all, $placeInfo, $pages, 'SerpApi HTTP '.$response->status().': '.$this->extractError($json));
+                }
+
+                if (isset($json['error'])) {
+                    return $this->reviewsResult(false, $all, $placeInfo, $pages, 'SerpApi error: '.$json['error']);
+                }
+
+                $placeInfo ??= is_array($json['place_info'] ?? null) ? $json['place_info'] : null;
+
+                $pageReviews = is_array($json['reviews'] ?? null) ? $json['reviews'] : [];
+                $all = array_merge($all, $pageReviews);
+
+                $token = $json['serpapi_pagination']['next_page_token'] ?? null;
+
+                if ($stopBeforeDate !== null && $this->hasReviewOlderThan($pageReviews, $stopBeforeDate)) {
+                    break;
+                }
+            } while (filled($token) && $pages < $maxPages);
+
+            return $this->reviewsResult(true, $all, $placeInfo, $pages, null);
+        } catch (Throwable $e) {
+            return $this->reviewsResult(false, $all, $placeInfo, $pages, 'Exception: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $reviews
+     */
+    private function hasReviewOlderThan(array $reviews, string $date): bool
+    {
+        foreach ($reviews as $review) {
+            $iso = $review['iso_date'] ?? null;
+
+            if (is_string($iso) && $iso !== '' && substr($iso, 0, 10) < $date) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array{success: bool, reviews: array<int, array<string, mixed>>, place_info: ?array<string, mixed>, pages_fetched: int, error: ?string}
+     */
+    private function reviewsResult(bool $success, array $reviews, ?array $placeInfo, int $pages, ?string $error): array
+    {
+        return [
+            'success' => $success,
+            'reviews' => $reviews,
+            'place_info' => $placeInfo,
+            'pages_fetched' => $pages,
+            'error' => $error,
+        ];
+    }
+
+    /**
      * SerpApi memakai beberapa nama: `reviews` (jumlah) atau `reviews_count`.
      *
      * @param  array<string, mixed>  $placeInfo

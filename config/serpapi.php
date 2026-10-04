@@ -53,4 +53,13 @@ return [
     'daily_search_limit' => (int) env('SERPAPI_DAILY_SEARCH_LIMIT', 40),
     'max_pages_per_place' => (int) env('SERPAPI_MAX_PAGES_PER_PLACE', 3),
 
+    /*
+    | Pengambilan REVIEW individual (untuk analitik distribusi bintang).
+    |
+    | - reviews_enabled   : aktifkan penyimpanan review individual.
+    | - reviews_max_pages : maksimum halaman review per tempat per sinkronisasi
+    |   (tiap halaman = 1 search). 1 halaman ≈ 8-20 review.
+    */
+    'reviews_enabled' => (bool) env('SERPAPI_REVIEWS_ENABLED', true),
+    'reviews_max_pages' => (int) env('SERPAPI_REVIEWS_MAX_PAGES', 3),
 ];

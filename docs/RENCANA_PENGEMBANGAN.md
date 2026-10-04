@@ -12,7 +12,7 @@
 | Modul | Isi |
 |---|---|
 | **Guest Analytics** | Statistik jumlah **kendaraan yang masuk** per minggu. Input **manual** oleh admin → diolah menjadi grafik/statistik. |
-| **Rating Analytics** | Statistik **rating & jumlah ulasan Google Maps** untuk 2 lokasi: **Rumah Makan Handayani Paiton** & **Cottage Wisata Paiton**. Filter periode: **by tanggal**, **minggu ini**, **bulan ini**. |
+| **Rating Analytics** | **Distribusi bintang**: berapa orang memberi bintang 1, 2, 3, 4, 5 untuk 2 lokasi: **Rumah Makan Handayani Paiton** & **Cottage Wisata Paiton**. Plus **tren total ulasan** dari waktu ke waktu. Filter periode (berdasarkan **tanggal review**): by tanggal / minggu ini / bulan ini. |
 
 **Stack:** Laravel 12 + Filament 3.3.55 (satu ekosistem dengan Portal & Logistik).
 **Pengguna:** hanya admin internal (login Filament).

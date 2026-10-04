@@ -10,7 +10,7 @@ use App\Services\SerpApi\QuotaGuard;
 use Illuminate\Console\Command;
 
 /**
- * Mengambil snapshot rating untuk tempat yang ANALISIS-nya aktif.
+ * Mengambil snapshot rating + review individual untuk tempat yang analisisnya aktif.
  *
  * Dijalankan oleh scheduler (lihat routes/console.php) ATAU manual.
  * Hanya memproses tempat dengan mode `manual`/`scheduled` (mode `off` dilewati).
@@ -20,12 +20,15 @@ class SnapshotRatingsCommand extends Command
 {
     protected $signature = 'analytics:snapshot-ratings
                             {--force : Ambil untuk SEMUA tempat aktif (abaikan jadwal & mode off)}
-                            {--place= : ID tempat tertentu saja}';
+                            {--place= : ID tempat tertentu saja}
+                            {--no-reviews : Jangan ambil review individual (hanya ringkasan rating)}';
 
-    protected $description = 'Ambil snapshot rating Google Maps (via SerpApi) untuk tempat yang aktif.';
+    protected $description = 'Ambil snapshot rating + review Google Maps (via SerpApi) untuk tempat yang aktif.';
 
     public function handle(RatingSyncService $sync, QuotaGuard $quota): int
     {
+        $withReviews = ! (bool) $this->option('no-reviews');
+
         $this->info('Sisa kuota SerpApi hari ini: '.$quota->remaining().'/'.$quota->dailyLimit());
 
         if ($this->quotaExhausted($quota)) {
@@ -35,27 +38,41 @@ class SnapshotRatingsCommand extends Command
         }
 
         if ($placeId = $this->option('place')) {
-            return $this->syncOne((int) $placeId, $sync);
+            return $this->syncOne((int) $placeId, $sync, $withReviews);
         }
 
         $count = 0;
 
         if ($this->option('force')) {
-            $places = Place::query()->active()->get();
-
-            foreach ($places as $place) {
-                $count += $this->process($place, $sync, force: true);
+            foreach (Place::query()->active()->get() as $place) {
+                $this->process($place, $sync, force: true, withReviews: $withReviews);
+                $count++;
             }
         } else {
             // Mode terjadwal yang sudah due.
-            $snapshots = $sync->syncDue();
-            $count = count($snapshots);
+            $snapshots = [];
+
+            foreach (Place::query()->scheduled()->get() as $place) {
+                if (! $place->isDueForSync()) {
+                    continue;
+                }
+
+                if (! $quota->hasRemaining()) {
+                    $this->warn('Kuota habis di tengah proses. Berhenti.');
+                    break;
+                }
+
+                $snapshots[] = $sync->syncPlace($place, withReviews: $withReviews);
+                $count++;
+            }
 
             foreach ($snapshots as $snapshot) {
                 $this->line(sprintf(
                     '  - %s: %s',
                     $snapshot->place->name ?? "place#{$snapshot->place_id}",
-                    $snapshot->status === 'ok' ? "OK ({$snapshot->rating}★, {$snapshot->reviews_count} ulasan)" : "GAGAL ({$snapshot->error_message})",
+                    $snapshot->status === 'ok'
+                        ? "OK ({$snapshot->rating}★, {$snapshot->reviews_count} ulasan)"
+                        : "GAGAL ({$snapshot->error_message})",
                 ));
             }
         }
@@ -65,7 +82,7 @@ class SnapshotRatingsCommand extends Command
         return self::SUCCESS;
     }
 
-    private function syncOne(int $placeId, RatingSyncService $sync): int
+    private function syncOne(int $placeId, RatingSyncService $sync, bool $withReviews): int
     {
         $place = Place::query()->find($placeId);
 
@@ -75,10 +92,11 @@ class SnapshotRatingsCommand extends Command
             return self::FAILURE;
         }
 
-        $snapshot = $sync->syncPlace($place, force: true);
+        $snapshot = $sync->syncPlace($place, force: true, withReviews: $withReviews);
 
         if ($snapshot->status === 'ok') {
-            $this->info("{$place->name}: OK ({$snapshot->rating}★, {$snapshot->reviews_count} ulasan)");
+            $place->refresh();
+            $this->info("{$place->name}: OK ({$snapshot->rating}★, {$snapshot->reviews_count} ulasan; total review tersimpan: {$place->reviews_synced})");
         } else {
             $this->error("{$place->name}: GAGAL ({$snapshot->error_message})");
         }
@@ -86,20 +104,19 @@ class SnapshotRatingsCommand extends Command
         return self::SUCCESS;
     }
 
-    /**
-     * @return int jumlah tempat berhasil diproses
-     */
-    private function process(Place $place, RatingSyncService $sync, bool $force): int
+    private function process(Place $place, RatingSyncService $sync, bool $force, bool $withReviews): void
     {
-        $snapshot = $sync->syncPlace($place, force: $force);
+        $snapshot = $sync->syncPlace($place, force: $force, withReviews: $withReviews);
+
+        $place->refresh();
 
         $this->line(sprintf(
             '  - %s: %s',
             $place->name,
-            $snapshot->status === 'ok' ? "OK ({$snapshot->rating}★)" : "GAGAL ({$snapshot->error_message})",
+            $snapshot->status === 'ok'
+                ? "OK ({$snapshot->rating}★, review tersimpan: {$place->reviews_synced})"
+                : "GAGAL ({$snapshot->error_message})",
         ));
-
-        return 1;
     }
 
     private function quotaExhausted(QuotaGuard $quota): bool

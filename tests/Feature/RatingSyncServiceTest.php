@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Models\Place;
 use App\Models\RatingSnapshot;
+use App\Models\Review;
 use App\Models\SerpApiUsage;
 use App\Services\Analytics\RatingSyncService;
 use App\Services\SerpApi\QuotaGuard;
@@ -65,15 +66,62 @@ class RatingSyncServiceTest extends TestCase
 
         $place = Place::factory()->fetchable()->create(['analysis_mode' => Place::MODE_MANUAL]);
 
-        $snapshot = $this->service()->syncPlace($place);
+        // Tanpa review individual -> hanya 1 search (rating).
+        $snapshot = $this->service()->syncPlace($place, withReviews: false);
 
         $this->assertSame(RatingSnapshot::STATUS_OK, $snapshot->status);
         $this->assertSame(4.6, $snapshot->rating);
         $this->assertSame(1591, $snapshot->reviews_count);
         $this->assertNotNull($place->fresh()->last_synced_at);
 
-        // Kuota tercatat 1.
+        // Kuota tercatat 1 (hanya ringkasan rating).
         $this->assertSame(1, (int) SerpApiUsage::query()->value('searches'));
+    }
+
+    public function test_sync_with_reviews_stores_individual_reviews(): void
+    {
+        Http::fake([
+            'serpapi.com/*' => Http::sequence()
+                // 1) Panggilan fetchRating.
+                ->push(['place_info' => ['title' => 'RM', 'rating' => 4.6, 'reviews' => 1591]], 200)
+                // 2) Panggilan fetchReviews (halaman pertama).
+                ->push([
+                    'reviews' => [
+                        ['rating' => 5.0, 'iso_date' => '2026-06-10T10:00:00Z', 'review_id' => 'a', 'user' => ['name' => 'A']],
+                        ['rating' => 3.0, 'iso_date' => '2026-06-09T10:00:00Z', 'review_id' => 'b', 'user' => ['name' => 'B']],
+                    ],
+                    'serpapi_pagination' => [],
+                ], 200),
+        ]);
+
+        $place = Place::factory()->fetchable()->create(['analysis_mode' => Place::MODE_MANUAL]);
+
+        $this->service()->syncPlace($place, withReviews: true);
+
+        $this->assertSame(2, Review::query()->where('place_id', $place->id)->count());
+        $this->assertSame(2, $place->fresh()->reviews_synced);
+        $this->assertSame('2026-06-09', $place->fresh()->oldest_review_date->toDateString());
+        $this->assertSame('2026-06-10', $place->fresh()->newest_review_date->toDateString());
+    }
+
+    public function test_sync_reviews_is_idempotent(): void
+    {
+        Http::fake([
+            'serpapi.com/*' => Http::response([
+                'reviews' => [
+                    ['rating' => 5.0, 'iso_date' => '2026-06-10T10:00:00Z', 'review_id' => 'same', 'user' => ['name' => 'A']],
+                ],
+                'serpapi_pagination' => [],
+            ], 200),
+        ]);
+
+        $place = Place::factory()->fetchable()->create(['analysis_mode' => Place::MODE_MANUAL]);
+
+        $this->service()->syncReviews($place);
+        $this->service()->syncReviews($place);
+
+        // Tetap 1 meski diambil 2x (idempoten via review_key).
+        $this->assertSame(1, Review::query()->where('place_id', $place->id)->count());
     }
 
     public function test_quota_exhausted_blocks_fetch(): void

@@ -92,4 +92,58 @@ class SerpApiClientTest extends TestCase
         $this->assertFalse($result->success);
         $this->assertStringContainsString('place_info', (string) $result->error);
     }
+
+    // -----------------------------------------------------------------
+    // fetchReviews (paginasi)
+    // -----------------------------------------------------------------
+
+    public function test_fetch_reviews_paginates_and_counts_searches(): void
+    {
+        Http::fake([
+            'serpapi.com/*' => Http::sequence()
+                ->push([
+                    'reviews' => [
+                        ['rating' => 5.0, 'iso_date' => '2026-06-10T10:00:00Z', 'review_id' => 'a', 'user' => ['name' => 'A']],
+                        ['rating' => 3.0, 'iso_date' => '2026-06-09T10:00:00Z', 'review_id' => 'b', 'user' => ['name' => 'B']],
+                    ],
+                    'serpapi_pagination' => ['next_page_token' => 'TOKEN1'],
+                ])
+                ->push([
+                    'reviews' => [
+                        ['rating' => 1.0, 'iso_date' => '2026-06-08T10:00:00Z', 'review_id' => 'c', 'user' => ['name' => 'C']],
+                    ],
+                    'serpapi_pagination' => [],
+                ]),
+        ]);
+
+        $costs = [];
+        $out = $this->client()->fetchReviews(
+            dataId: '0x1:0x2',
+            maxPages: 5,
+            onSearch: function (int $c) use (&$costs): void {
+                $costs[] = $c;
+            },
+        );
+
+        $this->assertTrue($out['success']);
+        $this->assertCount(3, $out['reviews']);
+        $this->assertSame(2, $out['pages_fetched']);
+        $this->assertSame([1, 1], $costs); // 2 search terpakai.
+    }
+
+    public function test_fetch_reviews_respects_max_pages(): void
+    {
+        Http::fake([
+            'serpapi.com/*' => Http::response([
+                'reviews' => [
+                    ['rating' => 5.0, 'iso_date' => '2026-06-10T10:00:00Z', 'review_id' => 'a', 'user' => ['name' => 'A']],
+                ],
+                'serpapi_pagination' => ['next_page_token' => 'KEEP_GOING'],
+            ], 200),
+        ]);
+
+        $out = $this->client()->fetchReviews(dataId: '0x1:0x2', maxPages: 2);
+
+        $this->assertSame(2, $out['pages_fetched']);
+    }
 }

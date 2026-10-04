@@ -6,18 +6,20 @@ namespace App\Services\Analytics;
 
 use App\Models\Place;
 use App\Models\RatingSnapshot;
+use App\Models\Review;
 use App\Services\SerpApi\QuotaGuard;
 use App\Services\SerpApi\RatingResult;
+use App\Services\SerpApi\ReviewParser;
 use App\Services\SerpApi\SerpApiClient;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Mengambil data rating satu tempat lalu menyimpannya sebagai snapshot.
+ * Mengambil data rating & review sebuah tempat dari SerpApi, lalu menyimpannya:
+ *  - `rating_snapshots` : ringkasan (rating rata-rata + total ulasan) per hari,
+ *  - `reviews`          : review individual (bintang + tanggal) — AKUMULATIF.
  *
- * Menghormati:
- *  - mode analisis tempat (off → tidak diambil),
- *  - guard kuota SerpApi harian,
- *  - idempotensi (unik per tempat/hari/sumber).
+ * Menghormati: mode analisis tempat, guard kuota, idempotensi.
  */
 class RatingSyncService
 {
@@ -27,16 +29,16 @@ class RatingSyncService
     ) {}
 
     /**
-     * Ambil & simpan snapshot untuk sebuah tempat.
+     * Ambil & simpan untuk sebuah tempat.
      *
-     * @param  bool  $force  Abaikan saklar mode (untuk tombol manual developer).
+     * @param  bool  $force  Abaikan saklar mode (tombol manual developer).
+     * @param  bool  $withReviews  Sekaligus ambil review individual (paginasi).
+     * @param  int  $maxReviewPages  Batas halaman review (hemat kuota).
      */
-    public function syncPlace(Place $place, bool $force = false): RatingSnapshot
+    public function syncPlace(Place $place, bool $force = false, bool $withReviews = true, ?int $maxReviewPages = null): RatingSnapshot
     {
         $now = CarbonImmutable::now();
 
-        // Bila tidak dipaksa & analisis mati → catat sebagai error "off"?
-        // Tidak: cukup kembalikan snapshot status error agar jejak jelas.
         if (! $force && ! $place->isAnalysisEnabled()) {
             return $this->storeError($place, $now, 'Analisis dinonaktifkan untuk tempat ini.');
         }
@@ -59,11 +61,117 @@ class RatingSyncService
             onSearch: fn (int $cost) => $this->quota->record($cost),
         );
 
-        return $this->store($place, $now, $result);
+        $withReviews = $withReviews && (bool) config('serpapi.reviews_enabled', true);
+
+        $snapshot = $this->store($place, $now, $result);
+
+        if ($snapshot->status === RatingSnapshot::STATUS_OK && $withReviews) {
+            $this->syncReviews($place, $maxReviewPages);
+        }
+
+        return $snapshot;
     }
 
     /**
-     * Jalankan sinkronisasi untuk semua tempat terjadwal yang sudah waktunya.
+     * Ambil review individual (berhalaman) & simpan secara akumulatif.
+     *
+     * @return int jumlah review BARU yang disimpan
+     */
+    public function syncReviews(Place $place, ?int $maxReviewPages = null): int
+    {
+        if (! $this->client->isConfigured() || ! $place->isFetchable()) {
+            return 0;
+        }
+
+        // Batasi jumlah halaman agar tidak melebihi sisa kuota hari ini.
+        $remaining = $this->quota->remaining();
+
+        if ($remaining <= 0) {
+            return 0;
+        }
+
+        $maxPages = min(
+            $maxReviewPages ?? (int) config('serpapi.reviews_max_pages', 3),
+            $remaining,
+        );
+
+        $now = CarbonImmutable::now();
+
+        $response = $this->client->fetchReviews(
+            dataId: $place->serpapi_data_id,
+            placeId: $place->serpapi_place_id,
+            maxPages: $maxPages,
+            sortBy: 'newestFirst',
+            onSearch: fn (int $cost) => $this->quota->record($cost),
+        );
+
+        if (! $response['success'] || $response['reviews'] === []) {
+            return 0;
+        }
+
+        $inserted = 0;
+
+        DB::transaction(function () use ($place, $response, $now, &$inserted): void {
+            foreach ($response['reviews'] as $raw) {
+                $parsed = ReviewParser::parse($raw);
+
+                if ($parsed === null) {
+                    continue;
+                }
+
+                // Akumulatif & idempoten: lewati yang sudah ada.
+                $exists = Review::query()
+                    ->where('place_id', $place->id)
+                    ->where('review_key', $parsed['review_key'])
+                    ->exists();
+
+                if ($exists) {
+                    continue;
+                }
+
+                Review::query()->create([
+                    'place_id' => $place->id,
+                    'review_id' => $parsed['review_id'],
+                    'review_key' => $parsed['review_key'],
+                    'rating' => $parsed['rating'],
+                    'rating_raw' => $parsed['rating_raw'],
+                    'review_date' => $parsed['review_date'],
+                    'reviewed_at' => $parsed['reviewed_at'],
+                    'author_name' => $parsed['author_name'],
+                    'author_id' => $parsed['author_id'],
+                    'likes' => $parsed['likes'],
+                    'snippet' => $parsed['snippet'],
+                    'captured_at' => $now,
+                ]);
+
+                $inserted++;
+            }
+
+            $this->refreshReviewStats($place);
+        });
+
+        return $inserted;
+    }
+
+    /**
+     * Perbarui statistik cakupan review pada tempat.
+     */
+    public function refreshReviewStats(Place $place): void
+    {
+        $stats = Review::query()
+            ->where('place_id', $place->id)
+            ->selectRaw('COUNT(*) as total, MIN(review_date) as oldest, MAX(review_date) as newest')
+            ->first();
+
+        $place->forceFill([
+            'reviews_synced' => (int) ($stats->total ?? 0),
+            'oldest_review_date' => $stats->oldest ?? null,
+            'newest_review_date' => $stats->newest ?? null,
+        ])->save();
+    }
+
+    /**
+     * Jalankan untuk semua tempat terjadwal yang sudah due.
      *
      * @return array<int, RatingSnapshot>
      */
