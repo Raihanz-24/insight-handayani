@@ -58,8 +58,17 @@ return [
     |
     | - reviews_enabled   : aktifkan penyimpanan review individual.
     | - reviews_max_pages : maksimum halaman review per tempat per sinkronisasi
-    |   (tiap halaman = 1 search). 1 halaman ≈ 8-20 review.
+    |   (tiap halaman = 1 search; halaman 1 = 8 review, lanjutan = 20).
+    |   Sync harian akan BERHENTI lebih awal begitu menemukan review yang
+    |   lebih tua dari tanggal target (lihat stop_before_buffer_days), jadi
+    |   angka ini hanya batas pengaman atas.
+    | - reviews_max_pages_backfill : batas halaman untuk mode backfill (tarik
+    |   sebanyak mungkin history).
+    | - stop_before_buffer_days : berhenti bila review sudah lebih tua dari
+    |   (hari ini - N hari). 0 = berhenti begitu lewat hari ini.
     */
     'reviews_enabled' => (bool) env('SERPAPI_REVIEWS_ENABLED', true),
-    'reviews_max_pages' => (int) env('SERPAPI_REVIEWS_MAX_PAGES', 3),
+    'reviews_max_pages' => (int) env('SERPAPI_REVIEWS_MAX_PAGES', 25),
+    'reviews_max_pages_backfill' => (int) env('SERPAPI_REVIEWS_MAX_PAGES_BACKFILL', 100),
+    'stop_before_buffer_days' => (int) env('SERPAPI_STOP_BEFORE_BUFFER_DAYS', 1),
 ];

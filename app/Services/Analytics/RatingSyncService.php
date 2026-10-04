@@ -69,6 +69,11 @@ class RatingSyncService
         $starCounts = [1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0];
 
         if ($snapshot->status === RatingSnapshot::STATUS_OK && $withReviews) {
+            // Berhenti lebih awal begitu review lebih tua dari (hari ini - buffer).
+            // Karena review per hari sedikit, sync harian biasanya cukup 1-2 request.
+            $bufferDays = (int) config('serpapi.stop_before_buffer_days', 1);
+            $stopBefore = $now->subDays($bufferDays)->toDateString();
+
             // Halaman pertama sudah diambil lewat fetchRating → lanjutkan dari
             // token-nya agar tidak memakai kuota ekstra (hemat 1 search).
             $starCounts = $this->syncReviews(
@@ -76,6 +81,7 @@ class RatingSyncService
                 $maxReviewPages,
                 initialReviews: $result->reviews,
                 initialToken: $result->nextPageToken,
+                stopBeforeDate: $stopBefore,
             );
         }
 
@@ -91,6 +97,7 @@ class RatingSyncService
      * Ambil review individual (berhalaman) & simpan secara akumulatif.
      *
      * @param  array<int, array<string, mixed>>  $initialReviews  review halaman 1 (bila sudah diambil)
+     * @param  string|null  $stopBeforeDate  berhenti bila review lebih tua dari tanggal ini (hemat kuota)
      * @return array<int, int> jumlah review BARU per bintang [1=>n, ..., 5=>n]
      */
     public function syncReviews(
@@ -98,6 +105,7 @@ class RatingSyncService
         ?int $maxReviewPages = null,
         array $initialReviews = [],
         ?string $initialToken = null,
+        ?string $stopBeforeDate = null,
     ): array {
         $empty = [1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0];
 
@@ -112,7 +120,7 @@ class RatingSyncService
             return $empty;
         }
 
-        $requestedPages = $maxReviewPages ?? (int) config('serpapi.reviews_max_pages', 3);
+        $requestedPages = $maxReviewPages ?? (int) config('serpapi.reviews_max_pages', 25);
 
         // `maxPages` = total anggaran halaman (halaman 1 yang sudah diambil
         // lewat fetchRating tetap dihitung 1 oleh klien).
@@ -128,6 +136,7 @@ class RatingSyncService
             onSearch: fn (int $cost) => $this->quota->record($cost),
             initialReviews: $initialReviews,
             initialToken: $initialToken,
+            stopBeforeDate: $stopBeforeDate,
         );
 
         if (! $response['success'] || $response['reviews'] === []) {
@@ -176,6 +185,31 @@ class RatingSyncService
         });
 
         return $starCounts;
+    }
+
+    /**
+     * Backfill: tarik sebanyak mungkin review historis (tanpa batas tanggal),
+     * sampai kehabisan token atau mencapai batas halaman.
+     *
+     * @return int jumlah review BARU yang tersimpan
+     */
+    public function backfillReviews(Place $place, ?int $maxPages = null): int
+    {
+        if (! $this->client->isConfigured() || ! $place->isFetchable()) {
+            return 0;
+        }
+
+        $limit = $maxPages ?? (int) config('serpapi.reviews_max_pages_backfill', 100);
+
+        $before = (int) $place->reviews_synced;
+
+        // Tidak pakai `initialReviews` → ambil dari halaman 1 (rating sudah
+        // tersimpan terpisah bila perlu; backfill fokus review).
+        $this->syncReviews($place, $limit, stopBeforeDate: null);
+
+        $place->refresh();
+
+        return max(0, (int) $place->reviews_synced - $before);
     }
 
     /**

@@ -21,6 +21,7 @@ class SnapshotRatingsCommand extends Command
     protected $signature = 'analytics:snapshot-ratings
                             {--force : Ambil untuk SEMUA tempat aktif (abaikan jadwal & mode off)}
                             {--place= : ID tempat tertentu saja}
+                            {--backfill : Tarik sebanyak mungkin review historis (sekali saja, borong kuota)}
                             {--no-reviews : Jangan ambil review individual (hanya ringkasan rating)}';
 
     protected $description = 'Ambil snapshot rating + review Google Maps (via SerpApi) untuk tempat yang aktif.';
@@ -35,6 +36,11 @@ class SnapshotRatingsCommand extends Command
             $this->warn('Kuota SerpApi harian sudah habis. Berhenti.');
 
             return self::SUCCESS;
+        }
+
+        // ── Mode backfill: tarik history review sebanyak mungkin ──
+        if ($this->option('backfill')) {
+            return $this->runBackfill($sync, $quota);
         }
 
         if ($placeId = $this->option('place')) {
@@ -122,5 +128,49 @@ class SnapshotRatingsCommand extends Command
     private function quotaExhausted(QuotaGuard $quota): bool
     {
         return ! $quota->hasRemaining();
+    }
+
+    /**
+     * Tarik history review sebanyak mungkin (menghormati kuota harian).
+     */
+    private function runBackfill(RatingSyncService $sync, QuotaGuard $quota): int
+    {
+        $places = $this->option('place')
+            ? Place::query()->whereKey((int) $this->option('place'))->get()
+            : Place::query()->active()->get();
+
+        if ($places->isEmpty()) {
+            $this->error('Tidak ada tempat untuk di-backfill.');
+
+            return self::FAILURE;
+        }
+
+        $maxPages = (int) config('serpapi.reviews_max_pages_backfill', 100);
+
+        $this->warn("MODE BACKFILL: menarik sampai {$maxPages} halaman/tempat (borong kuota).");
+
+        foreach ($places as $place) {
+            $remaining = $quota->remaining();
+
+            if ($remaining <= 0) {
+                $this->warn('Kuota habis. Berhenti.');
+
+                break;
+            }
+
+            $added = $sync->backfillReviews($place, min($maxPages, $remaining));
+            $place->refresh();
+
+            $this->line(sprintf(
+                '  - %s: +%d review baru (total tersimpan: %d)',
+                $place->name,
+                $added,
+                $place->reviews_synced,
+            ));
+        }
+
+        $this->info('Backfill selesai. Sisa kuota: '.$quota->remaining().'/'.$quota->dailyLimit());
+
+        return self::SUCCESS;
     }
 }

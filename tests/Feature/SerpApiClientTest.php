@@ -183,4 +183,31 @@ class SerpApiClientTest extends TestCase
 
         $this->assertSame(2, $out['pages_fetched']);
     }
+
+    public function test_fetch_reviews_stops_early_when_older_than_stop_date(): void
+    {
+        // Halaman 1 memuat review lama (2026-06-01) → harus BERHENTI,
+        // tidak melanjutkan ke halaman berikutnya walau ada token.
+        Http::fake([
+            'serpapi.com/*' => Http::response([
+                'reviews' => [
+                    ['rating' => 5.0, 'iso_date' => '2026-06-01T10:00:00Z', 'review_id' => 'old', 'user' => ['name' => 'A']],
+                ],
+                'serpapi_pagination' => ['next_page_token' => 'SHOULD_NOT_FOLLOW'],
+            ], 200),
+        ]);
+
+        $costs = [];
+        $out = $this->client()->fetchReviews(
+            dataId: '0x1:0x2',
+            maxPages: 10,
+            onSearch: function (int $c) use (&$costs): void {
+                $costs[] = $c;
+            },
+            stopBeforeDate: '2026-06-10',
+        );
+
+        $this->assertSame(1, $out['pages_fetched']); // hanya 1 request
+        $this->assertSame([1], $costs);
+    }
 }
