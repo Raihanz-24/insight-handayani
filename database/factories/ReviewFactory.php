@@ -6,6 +6,7 @@ namespace Database\Factories;
 
 use App\Models\Place;
 use App\Models\Review;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -17,7 +18,7 @@ class ReviewFactory extends Factory
 
     public function definition(): array
     {
-        $at = \Carbon\CarbonImmutable::parse(fake()->dateTimeBetween('-2 years', 'now'));
+        $at = CarbonImmutable::parse(fake()->dateTimeBetween('-2 years', 'now'));
         $rating = fake()->numberBetween(1, 5);
         $snippet = fake()->sentence();
 

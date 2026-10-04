@@ -264,6 +264,7 @@ php artisan up
 | `analytics:make-developer <email>` | Buat/jadikan user sebagai developer |
 | `analytics:export-data` | Ekspor data (places/reviews/snapshot/statistik) ke JSON |
 | `analytics:import-data --path=FILE` | Impor data dari JSON ke server (idempoten) |
+| `sso:assign-uuid <email>` | Tetapkan/tampilkan `portal_uuid` (tautan SSO) user |
 
 ### Catatan penting soal pengambilan review
 
@@ -305,6 +306,45 @@ ulang otomatis.
 
 ---
 
+## 13b. SSO dengan Portal Handayani (opsional)
+
+Insight bisa memakai SSO ke Handayani Portal. **Default OFF** — aman untuk
+deploy dulu tanpa SSO, lalu aktifkan menyusul.
+
+Ringkas:
+
+1. Daftarkan aplikasi "Insight Handayani" di **Portal → Aplikasi**, catat
+   `client_id`/`client_secret`.
+2. Isi `.env`:
+
+   ```dotenv
+   SSO_ENABLED=false               # ubah ke true setelah siap
+   SSO_PORTAL_BASE_URL=https://portal.handayani.my.id
+   SSO_CLIENT_ID=CHANGE_ME
+   SSO_CLIENT_SECRET=CHANGE_ME
+   SSO_REDIRECT_URI=https://insight.handayani.my.id/sso/callback
+   ```
+
+3. Tautkan user: `php artisan sso:assign-uuid <email>` lalu isi UUID itu di
+   Portal → **Tautan Akun** (+ beri **Hak Akses**).
+4. Set `SSO_ENABLED=true` + `php artisan config:clear`.
+
+> Panduan lengkap: [`docs/SSO_INSIGHT.md`](SSO_INSIGHT.md).
+
+### Perilaku saat SSO aktif
+
+- Login manual **diblokir** (server-side) & diganti pop-up menuju Portal.
+- **Logout** kembali ke Portal.
+- `SSO_ENABLED=false` → login manual normal kembali (rollback cepat).
+
+### URL admin & halaman depan
+
+- Path panel diatur `ANALYTICS_ADMIN_PATH` (nilai acak di produksi).
+- `/` otomatis mengarah ke `/<ANALYTICS_ADMIN_PATH>`, jadi tidak ada halaman
+  depan terpisah maupun URL admin yang mudah ditebak.
+
+---
+
 ## 14. Checklist sebelum go-live
 
 - [ ] `.env` terisi & `APP_DEBUG=false`, `APP_ENV=production`
@@ -318,3 +358,6 @@ ulang otomatis.
 - [ ] Cache (`config`/`route`/`view`) sudah dibangun
 - [ ] Kuota SerpApi harian diset sesuai paket Anda
 - [ ] (Opsional) Data hasil backfill lokal sudah diimpor: `analytics:import-data`
+- [ ] (Opsional SSO) `SSO_CLIENT_ID`/`SECRET` terisi & `SSO_ENABLED=true`
+- [ ] (Opsional SSO) User sudah punya `portal_uuid` & ditautkan di Portal
+- [ ] (Opsional SSO) `SSO_REDIRECT_URI` terdaftar persis di Portal

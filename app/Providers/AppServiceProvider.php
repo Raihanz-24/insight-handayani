@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Http\Responses\Auth\LogoutResponse;
 use App\Services\Maps\MapsLinkResolver;
 use App\Services\SerpApi\QuotaGuard;
 use App\Services\SerpApi\SerpApiClient;
@@ -14,6 +15,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Ganti tujuan setelah logout panel Filament:
+        // SSO aktif → halaman utama Portal; SSO nonaktif → login Insight.
+        $this->app->bind(
+            \Filament\Http\Responses\Auth\Contracts\LogoutResponse::class,
+            LogoutResponse::class,
+        );
+
         $this->app->singleton(MapsLinkResolver::class, function (): MapsLinkResolver {
             return new MapsLinkResolver(
                 timeout: (int) config('serpapi.timeout', 20),

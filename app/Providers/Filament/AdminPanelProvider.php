@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Auth\Login;
 use App\Filament\Widgets\AnalyticsOverview;
 use App\Filament\Widgets\RatingDistributionWidget;
 use Filament\Http\Middleware\Authenticate;
@@ -29,7 +30,7 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path(config('analytics.admin_path', 'admin'))
-            ->login()
+            ->login(Login::class)
             ->brandName('Handayani Analytics')
             ->colors([
                 'primary' => Color::Blue,

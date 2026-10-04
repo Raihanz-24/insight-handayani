@@ -29,6 +29,7 @@ class User extends Authenticatable implements FilamentUser
         'email',
         'password',
         'role',
+        'portal_uuid',
     ];
 
     /**
@@ -97,5 +98,13 @@ class User extends Authenticatable implements FilamentUser
             self::ROLE_DEVELOPER => 'Developer',
             default => 'User',
         };
+    }
+
+    /**
+     * Apakah akun ini sudah ditautkan ke Portal (punya portal_uuid)?
+     */
+    public function hasPortalLink(): bool
+    {
+        return filled($this->portal_uuid);
     }
 }

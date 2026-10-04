@@ -9,6 +9,11 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        then: function (): void {
+            // Route SSO (client) — di luar web.php agar tetap aditif.
+            Illuminate\Support\Facades\Route::middleware('web')
+                ->group(__DIR__.'/../routes/sso.php');
+        },
     )
     ->withMiddleware(function (Middleware $middleware): void {
         //

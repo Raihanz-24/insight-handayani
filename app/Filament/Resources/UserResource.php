@@ -86,6 +86,17 @@ class UserResource extends Resource
                     ->badge()
                     ->formatStateUsing(fn (string $state): string => $state === User::ROLE_DEVELOPER ? 'Developer' : 'User')
                     ->color(fn (string $state): string => $state === User::ROLE_DEVELOPER ? 'success' : 'gray'),
+                Tables\Columns\IconColumn::make('portal_uuid')
+                    ->label('Tautan Portal')
+                    ->boolean()
+                    ->state(fn (User $record): bool => $record->hasPortalLink())
+                    ->trueIcon('heroicon-o-check-badge')
+                    ->falseIcon('heroicon-o-minus-circle')
+                    ->trueColor('success')
+                    ->falseColor('gray')
+                    ->tooltip(fn (User $record): string => $record->hasPortalLink()
+                        ? 'portal_uuid: '.$record->portal_uuid
+                        : 'Belum ditautkan ke Portal'),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Dibuat')
                     ->dateTime('d M Y')

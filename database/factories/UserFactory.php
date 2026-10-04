@@ -45,6 +45,16 @@ class UserFactory extends Factory
     }
 
     /**
+     * User yang sudah ditautkan ke Portal (punya portal_uuid).
+     */
+    public function linkedToPortal(?string $uuid = null): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'portal_uuid' => $uuid ?? (string) Str::uuid(),
+        ]);
+    }
+
+    /**
      * Indicate that the model's email address should be unverified.
      */
     public function unverified(): static

@@ -8,12 +8,12 @@ use Tests\TestCase;
 class ExampleTest extends TestCase
 {
     /**
-     * A basic test example.
+     * Halaman depan mengarahkan ke panel admin (bukan 200 langsung).
      */
-    public function test_the_application_returns_a_successful_response(): void
+    public function test_the_application_redirects_root_to_admin_panel(): void
     {
-        $response = $this->get('/');
+        $path = trim((string) config('analytics.admin_path', 'admin'), '/');
 
-        $response->assertStatus(200);
+        $this->get('/')->assertRedirect('/'.$path);
     }
 }
