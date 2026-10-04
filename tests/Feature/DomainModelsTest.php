@@ -7,13 +7,32 @@ namespace Tests\Feature;
 use App\Models\GuestEntry;
 use App\Models\Place;
 use App\Models\RatingSnapshot;
+use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class DomainModelsTest extends TestCase
 {
     use RefreshDatabase;
+
+    // -----------------------------------------------------------------
+    // User / role
+    // -----------------------------------------------------------------
+
+    public function test_user_role_helpers(): void
+    {
+        $dev = User::factory()->create(['role' => User::ROLE_DEVELOPER]);
+        $user = User::factory()->create(['role' => User::ROLE_USER]);
+
+        $this->assertTrue($dev->isDeveloper());
+        $this->assertFalse($dev->isViewer());
+        $this->assertTrue($user->isViewer());
+        $this->assertFalse($user->isDeveloper());
+        $this->assertSame('Developer', $dev->roleLabel());
+        $this->assertSame('User', $user->roleLabel());
+    }
 
     // -----------------------------------------------------------------
     // Place
@@ -29,7 +48,6 @@ class DomainModelsTest extends TestCase
         $this->assertSame($resto->id, Place::query()->ofType(Place::TYPE_RESTAURANT)->first()->id);
         $this->assertSame($cottage->id, Place::query()->ofType(Place::TYPE_COTTAGE)->first()->id);
 
-        // Tanpa data_id/place_id -> belum fetchable.
         $this->assertFalse($resto->isFetchable());
 
         $fetchable = Place::factory()->fetchable()->create();
@@ -55,7 +73,6 @@ class DomainModelsTest extends TestCase
             'rating' => 4.0,
         ]);
 
-        // Snapshot lebih baru tapi GAGAL -> harus diabaikan.
         RatingSnapshot::factory()->for($place)->error()->create([
             'captured_at' => now(),
             'captured_date' => now()->toDateString(),
@@ -68,14 +85,73 @@ class DomainModelsTest extends TestCase
     }
 
     // -----------------------------------------------------------------
+    // Place — mode analisis & jadwal
+    // -----------------------------------------------------------------
+
+    public function test_place_analysis_enabled_depends_on_active_and_mode(): void
+    {
+        $manual = Place::factory()->create(['analysis_mode' => Place::MODE_MANUAL]);
+        $off = Place::factory()->off()->create();
+        $inactive = Place::factory()->create(['is_active' => false, 'analysis_mode' => Place::MODE_MANUAL]);
+
+        $this->assertTrue($manual->isAnalysisEnabled());
+        $this->assertFalse($off->isAnalysisEnabled());
+        $this->assertFalse($inactive->isAnalysisEnabled());
+    }
+
+    public function test_place_is_scheduled_requires_mode_and_interval(): void
+    {
+        $scheduled = Place::factory()->scheduled(1)->create();
+        $manual = Place::factory()->create(['analysis_mode' => Place::MODE_MANUAL]);
+        $noInterval = Place::factory()->create([
+            'analysis_mode' => Place::MODE_SCHEDULED,
+            'schedule_interval_days' => null,
+        ]);
+
+        $this->assertTrue($scheduled->isScheduled());
+        $this->assertFalse($manual->isScheduled());
+        $this->assertFalse($noInterval->isScheduled());
+
+        $this->assertSame(1, Place::query()->scheduled()->count());
+    }
+
+    public function test_place_is_due_for_sync(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-10 03:00:00', 'Asia/Jakarta'));
+
+        // Belum pernah sync -> due.
+        $fresh = Place::factory()->scheduled(1)->create(['last_synced_at' => null, 'schedule_hour' => 2]);
+        $this->assertTrue($fresh->isDueForSync());
+
+        // Baru saja sync, interval 7 hari -> belum due.
+        $recent = Place::factory()->scheduled(7)->create([
+            'last_synced_at' => Carbon::parse('2026-06-09 02:00:00', 'Asia/Jakarta'),
+            'schedule_hour' => 2,
+        ]);
+        $this->assertFalse($recent->isDueForSync());
+
+        // Sudah lewat interval (8 hari lalu, interval 7) -> due.
+        $overdue = Place::factory()->scheduled(7)->create([
+            'last_synced_at' => Carbon::parse('2026-06-01 02:00:00', 'Asia/Jakarta'),
+            'schedule_hour' => 2,
+        ]);
+        $this->assertTrue($overdue->isDueForSync());
+
+        // Mode OFF -> tidak pernah due.
+        $off = Place::factory()->off()->create(['last_synced_at' => null]);
+        $this->assertFalse($off->isDueForSync());
+
+        Carbon::setTestNow();
+    }
+
+    // -----------------------------------------------------------------
     // GuestEntry — normalisasi minggu
     // -----------------------------------------------------------------
 
     public function test_guest_entry_normalizes_week_start_to_monday(): void
     {
-        // 2026-01-07 adalah Rabu.
         $entry = new GuestEntry;
-        $entry->setWeekFromDate('2026-01-07');
+        $entry->setWeekFromDate('2026-01-07'); // Rabu
 
         $this->assertSame('2026-01-05', $entry->week_start->toDateString()); // Senin
         $this->assertSame('2026-01-11', $entry->week_end->toDateString());   // Minggu
@@ -95,9 +171,7 @@ class DomainModelsTest extends TestCase
         GuestEntry::factory()->create(['week_start' => '2026-01-05', 'week_end' => '2026-01-11']);
         GuestEntry::factory()->create(['week_start' => '2026-02-02', 'week_end' => '2026-02-08']);
 
-        $count = GuestEntry::query()->betweenDates('2026-01-01', '2026-01-31')->count();
-
-        $this->assertSame(1, $count);
+        $this->assertSame(1, GuestEntry::query()->betweenDates('2026-01-01', '2026-01-31')->count());
     }
 
     // -----------------------------------------------------------------

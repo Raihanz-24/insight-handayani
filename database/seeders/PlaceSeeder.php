@@ -8,11 +8,10 @@ use App\Models\Place;
 use Illuminate\Database\Seeder;
 
 /**
- * Menanam 2 lokasi yang dipantau.
+ * Menanam 2 lokasi yang dipantau (dengan data_id hasil resolve link Maps).
  *
- * Catatan: `serpapi_data_id` / `serpapi_place_id` sengaja dibiarkan kosong
- * (diisi via UI setelah Anda punya ID dari Google Maps/SerpApi). Selama kosong,
- * tempat ini BELUM bisa diambil otomatis — tapi tetap tampil di UI.
+ * Mode default `manual` agar TIDAK ada pengambilan otomatis saat pertama kali
+ * (hemat kuota). Developer dapat mengubah ke `scheduled` dari UI.
  */
 class PlaceSeeder extends Seeder
 {
@@ -20,21 +19,33 @@ class PlaceSeeder extends Seeder
     {
         $places = [
             [
-                'name' => 'Rumah Makan Handayani Paiton',
+                'name' => 'RM Handayani - Wisata Paiton',
+                'maps_url' => env('MAPS_URL_RM_HANDAYANI', 'https://maps.app.goo.gl/8HeX848jxD6rHFFG9'),
+                'latitude' => -7.718079,
+                'longitude' => 113.5370401,
                 'type' => Place::TYPE_RESTAURANT,
-                'query' => 'Rumah Makan Handayani Paiton',
+                'query' => 'RM Handayani Wisata Paiton',
                 'serpapi_data_id' => env('SERPAPI_DATA_ID_RM_HANDAYANI'),
                 'serpapi_place_id' => env('SERPAPI_PLACE_ID_RM_HANDAYANI'),
                 'is_active' => true,
+                'analysis_mode' => Place::MODE_MANUAL,
+                'schedule_interval_days' => 1,
+                'schedule_hour' => 2,
                 'note' => 'Restoran — rating dipantau dari Google Maps.',
             ],
             [
-                'name' => 'Cottage Wisata Paiton',
+                'name' => 'Wisata Paiton Cottage',
+                'maps_url' => env('MAPS_URL_COTTAGE_PAITON', 'https://maps.app.goo.gl/khrSGPHrRpJrzUhC6'),
+                'latitude' => -7.7171496,
+                'longitude' => 113.5371635,
                 'type' => Place::TYPE_COTTAGE,
-                'query' => 'Cottage Wisata Paiton',
+                'query' => 'Wisata Paiton Cottage',
                 'serpapi_data_id' => env('SERPAPI_DATA_ID_COTTAGE_PAITON'),
                 'serpapi_place_id' => env('SERPAPI_PLACE_ID_COTTAGE_PAITON'),
                 'is_active' => true,
+                'analysis_mode' => Place::MODE_MANUAL,
+                'schedule_interval_days' => 1,
+                'schedule_hour' => 2,
                 'note' => 'Cottage/penginapan — rating dipantau dari Google Maps.',
             ],
         ];
