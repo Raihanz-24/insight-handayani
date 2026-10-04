@@ -225,6 +225,92 @@
                 </div>
             @endif
 
+            {{-- Review BARU per hari (akurat: dari review baru yang tersimpan + validasi Google) --}}
+            <div class="mt-6">
+                <h4 class="mb-1 text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    Review Baru per Hari — Berapa Orang per Bintang
+                </h4>
+                <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                    Dihitung dari review <strong>baru yang tersimpan pada hari itu</strong>.
+                    Kolom "menurut Google" = selisih total ulasan (akurat) sebagai pembanding.
+                </p>
+
+                @php
+                    $nr = $row['newReviews'];
+                    $nrs = $row['newReviewsStars'];
+
+                    $newStarsOptions = [
+                        'chart' => ['type' => 'bar', 'height' => 300, 'stacked' => true, 'toolbar' => ['show' => false]],
+                        'series' => $nrs['series'],
+                        'xaxis' => ['categories' => array_map(fn ($d) => \Carbon\Carbon::parse($d)->translatedFormat('d M'), $nrs['labels'])],
+                        'plotOptions' => ['bar' => ['columnWidth' => '55%', 'borderRadius' => 4]],
+                        'legend' => ['position' => 'bottom'],
+                        'colors' => ['#22c55e', '#84cc16', '#eab308', '#f97316', '#ef4444'],
+                        'dataLabels' => ['enabled' => false],
+                    ];
+                @endphp
+
+                @if (count($nr) === 0)
+                    <p class="text-sm text-gray-400">
+                        Belum ada data review harian. Data ini terbentuk otomatis setiap kali sync (1×/hari).
+                    </p>
+                @else
+                    <div
+                        x-ignore x-load
+                        x-load-src="{{ \Filament\Support\Facades\FilamentAsset::getAlpineComponentSrc('apexcharts') }}"
+                        x-data="apexcharts({
+                            options: @js($newStarsOptions),
+                            chartId: '#newstars-{{ $place->id }}',
+                            theme: document.querySelector('html').matches('.dark') ? 'dark' : 'light',
+                            extraJsOptions: {},
+                        })"
+                        wire:key="newstars-{{ $place->id }}-{{ $from }}-{{ $to }}"
+                    >
+                        <div wire:ignore class="w-full"><div id="newstars-{{ $place->id }}"></div></div>
+                    </div>
+
+                    <div class="mt-4 overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-left text-gray-500 dark:text-gray-400">
+                                    <th class="py-2">Tanggal</th>
+                                    <th class="py-2 text-right">★5</th>
+                                    <th class="py-2 text-right">★4</th>
+                                    <th class="py-2 text-right">★3</th>
+                                    <th class="py-2 text-right">★2</th>
+                                    <th class="py-2 text-right">★1</th>
+                                    <th class="py-2 text-right">Review baru (tersimpan)</th>
+                                    <th class="py-2 text-right">Menurut Google</th>
+                                    <th class="py-2 text-right">Rating</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($nr as $r)
+                                    <tr class="border-t border-gray-100 dark:border-gray-800">
+                                        <td class="py-2">{{ \Carbon\Carbon::parse($r['date'])->translatedFormat('d M Y') }}</td>
+                                        <td class="py-2 text-right">{{ $r['distribution'][5] }}</td>
+                                        <td class="py-2 text-right">{{ $r['distribution'][4] }}</td>
+                                        <td class="py-2 text-right">{{ $r['distribution'][3] }}</td>
+                                        <td class="py-2 text-right">{{ $r['distribution'][2] }}</td>
+                                        <td class="py-2 text-right">{{ $r['distribution'][1] }}</td>
+                                        <td class="py-2 text-right font-medium">{{ $r['new_reviews'] }}</td>
+                                        <td class="py-2 text-right {{ $r['reviews_delta'] !== null ? 'text-success-600' : 'text-gray-400' }}">
+                                            {{ $r['reviews_delta'] !== null ? ($r['reviews_delta'] >= 0 ? '+'.number_format($r['reviews_delta']) : number_format($r['reviews_delta'])) : '—' }}
+                                        </td>
+                                        <td class="py-2 text-right">{{ $r['average_rating'] ? number_format($r['average_rating'], 2).' ★' : '—' }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                        <p class="mt-2 text-xs text-gray-400">
+                            Catatan: "review baru (tersimpan)" adalah yang berhasil kita ambil;
+                            "menurut Google" (selisih total ulasan) adalah angka sebenarnya — selisihnya
+                            berarti review yang belum kita ambil.
+                        </p>
+                    </div>
+                @endif
+            </div>
+
             {{-- Rekap mingguan/bulanan --}}
             <div class="mt-6">
                 <div class="mb-3 flex items-center justify-between">

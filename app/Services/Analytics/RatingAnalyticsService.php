@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Analytics;
 
+use App\Models\DailyReviewStat;
 use App\Models\Place;
 use App\Models\RatingSnapshot;
 use App\Models\Review;
@@ -235,5 +236,56 @@ class RatingAnalyticsService
         }
 
         return $out;
+    }
+
+    /**
+     * Statistik review BARU per hari (dari tabel `daily_review_stats`).
+     *
+     * Menjawab "hari ini ada berapa orang kasih ★1..★5" berdasarkan review baru
+     * yang tersimpan hari itu, beserta pembanding selisih total ulasan Google.
+     *
+     * @return array<int, array{date: string, new_reviews: int, distribution: array<int, int>, total_reviews: ?int, reviews_delta: ?int, average_rating: ?float}>
+     */
+    public function newReviewsTrend(Place $place, \DateTimeInterface|string $from, \DateTimeInterface|string $to): array
+    {
+        $fromDate = CarbonImmutable::parse($from)->toDateString();
+        $toDate = CarbonImmutable::parse($to)->toDateString();
+
+        return DailyReviewStat::query()
+            ->where('place_id', $place->id)
+            ->whereBetween('stat_date', [$fromDate, $toDate])
+            ->orderBy('stat_date')
+            ->get()
+            ->map(fn (DailyReviewStat $s): array => [
+                'date' => $s->stat_date->toDateString(),
+                'new_reviews' => $s->new_reviews,
+                'distribution' => $s->distribution(),
+                'total_reviews' => $s->total_reviews,
+                'reviews_delta' => $s->reviews_delta,
+                'average_rating' => $s->average_rating,
+            ])
+            ->all();
+    }
+
+    /**
+     * Seri bertumpuk "jumlah orang per bintang per hari" dari review BARU hari itu.
+     *
+     * @return array{labels: array<int, string>, series: array<int, array<string, mixed>>}
+     */
+    public function newReviewsStarSeries(Place $place, \DateTimeInterface|string $from, \DateTimeInterface|string $to): array
+    {
+        $rows = $this->newReviewsTrend($place, $from, $to);
+
+        $labels = array_map(fn ($r) => $r['date'], $rows);
+
+        $series = [];
+        for ($star = 5; $star >= 1; $star--) {
+            $series[] = [
+                'name' => $star.' bintang',
+                'data' => array_map(fn ($r): int => (int) ($r['distribution'][$star] ?? 0), $rows),
+            ];
+        }
+
+        return ['labels' => $labels, 'series' => $series];
     }
 }

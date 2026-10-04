@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Analytics;
 
+use App\Models\DailyReviewStat;
 use App\Models\Place;
 use App\Models\RatingSnapshot;
 use App\Models\Review;
@@ -65,15 +66,22 @@ class RatingSyncService
 
         $snapshot = $this->store($place, $now, $result);
 
+        $starCounts = [1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0];
+
         if ($snapshot->status === RatingSnapshot::STATUS_OK && $withReviews) {
             // Halaman pertama sudah diambil lewat fetchRating → lanjutkan dari
             // token-nya agar tidak memakai kuota ekstra (hemat 1 search).
-            $this->syncReviews(
+            $starCounts = $this->syncReviews(
                 $place,
                 $maxReviewPages,
                 initialReviews: $result->reviews,
                 initialToken: $result->nextPageToken,
             );
+        }
+
+        // Catat ringkasan HARIAN (review baru hari ini + pecahan bintang).
+        if ($snapshot->status === RatingSnapshot::STATUS_OK) {
+            $this->recordDailyStat($place, $now, $snapshot, $starCounts);
         }
 
         return $snapshot;
@@ -83,23 +91,25 @@ class RatingSyncService
      * Ambil review individual (berhalaman) & simpan secara akumulatif.
      *
      * @param  array<int, array<string, mixed>>  $initialReviews  review halaman 1 (bila sudah diambil)
-     * @return int jumlah review BARU yang disimpan
+     * @return array<int, int> jumlah review BARU per bintang [1=>n, ..., 5=>n]
      */
     public function syncReviews(
         Place $place,
         ?int $maxReviewPages = null,
         array $initialReviews = [],
         ?string $initialToken = null,
-    ): int {
+    ): array {
+        $empty = [1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0];
+
         if (! $this->client->isConfigured() || ! $place->isFetchable()) {
-            return 0;
+            return $empty;
         }
 
         // Batasi jumlah halaman agar tidak melebihi sisa kuota hari ini.
         $remaining = $this->quota->remaining();
 
         if ($remaining <= 0 && $initialReviews === []) {
-            return 0;
+            return $empty;
         }
 
         $requestedPages = $maxReviewPages ?? (int) config('serpapi.reviews_max_pages', 3);
@@ -121,12 +131,12 @@ class RatingSyncService
         );
 
         if (! $response['success'] || $response['reviews'] === []) {
-            return 0;
+            return $empty;
         }
 
-        $inserted = 0;
+        $starCounts = [1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0];
 
-        DB::transaction(function () use ($place, $response, $now, &$inserted): void {
+        DB::transaction(function () use ($place, $response, $now, &$starCounts): void {
             foreach ($response['reviews'] as $raw) {
                 $parsed = ReviewParser::parse($raw);
 
@@ -159,13 +169,65 @@ class RatingSyncService
                     'captured_at' => $now,
                 ]);
 
-                $inserted++;
+                $starCounts[$parsed['rating']] = ($starCounts[$parsed['rating']] ?? 0) + 1;
             }
 
             $this->refreshReviewStats($place);
         });
 
-        return $inserted;
+        return $starCounts;
+    }
+
+    /**
+     * Catat / perbarui ringkasan HARIAN untuk sebuah tempat.
+     *
+     * `new_reviews` = review baru yang tersimpan HARI INI (akumulatif dalam hari).
+     * Pecahan bintang diakumulasikan bila dipanggil beberapa kali pada hari sama.
+     * `reviews_delta` = selisih total ulasan Google vs hari snapshot sebelumnya.
+     *
+     * @param  array<int, int>  $starCounts
+     */
+    public function recordDailyStat(Place $place, CarbonImmutable $now, RatingSnapshot $snapshot, array $starCounts): DailyReviewStat
+    {
+        $date = $now->toDateString();
+        $newToday = array_sum($starCounts);
+
+        $existing = DailyReviewStat::query()
+            ->where('place_id', $place->id)
+            ->where('stat_date', $date)
+            ->first();
+
+        // Total ulasan pada snapshot sebelumnya (untuk menghitung delta).
+        $previousTotal = RatingSnapshot::query()
+            ->where('place_id', $place->id)
+            ->successful()
+            ->where('captured_date', '<', $date)
+            ->orderByDesc('captured_date')
+            ->value('reviews_count');
+
+        $delta = ($previousTotal !== null && $snapshot->reviews_count !== null)
+            ? (int) $snapshot->reviews_count - (int) $previousTotal
+            : null;
+
+        $place->refresh();
+
+        $data = [
+            'new_reviews' => ($existing->new_reviews ?? 0) + $newToday,
+            'star_1' => ($existing->star_1 ?? 0) + ($starCounts[1] ?? 0),
+            'star_2' => ($existing->star_2 ?? 0) + ($starCounts[2] ?? 0),
+            'star_3' => ($existing->star_3 ?? 0) + ($starCounts[3] ?? 0),
+            'star_4' => ($existing->star_4 ?? 0) + ($starCounts[4] ?? 0),
+            'star_5' => ($existing->star_5 ?? 0) + ($starCounts[5] ?? 0),
+            'total_reviews' => $snapshot->reviews_count,
+            'reviews_delta' => $delta,
+            'average_rating' => $snapshot->rating,
+            'synced_total' => (int) $place->reviews_synced,
+        ];
+
+        return DailyReviewStat::query()->updateOrCreate(
+            ['place_id' => $place->id, 'stat_date' => $date],
+            $data,
+        );
     }
 
     /**

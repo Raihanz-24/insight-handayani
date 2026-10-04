@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Models\DailyReviewStat;
 use App\Models\Place;
 use App\Models\RatingSnapshot;
 use App\Models\Review;
@@ -181,5 +182,45 @@ class RatingAnalyticsServiceTest extends TestCase
         $this->assertSame('2026-07-13', $recap[1]['key']);
         $this->assertSame(3361, $recap[1]['end_reviews']);
         $this->assertSame(1, $recap[1]['delta']); // 3361 - 3360
+    }
+
+    public function test_new_reviews_trend_and_star_series(): void
+    {
+        $place = Place::factory()->create();
+
+        DailyReviewStat::query()->create([
+            'place_id' => $place->id,
+            'stat_date' => '2026-07-10',
+            'new_reviews' => 8,
+            'star_5' => 6, 'star_4' => 1, 'star_3' => 1, 'star_2' => 0, 'star_1' => 0,
+            'total_reviews' => 3354,
+            'reviews_delta' => 8,
+            'average_rating' => 4.6,
+        ]);
+
+        DailyReviewStat::query()->create([
+            'place_id' => $place->id,
+            'stat_date' => '2026-07-11',
+            'new_reviews' => 5,
+            'star_5' => 3, 'star_4' => 2, 'star_3' => 0, 'star_2' => 0, 'star_1' => 0,
+            'total_reviews' => 3361,
+            'reviews_delta' => 7,
+            'average_rating' => 4.7,
+        ]);
+
+        $svc = app(RatingAnalyticsService::class);
+
+        $trend = $svc->newReviewsTrend($place, '2026-07-01', '2026-07-31');
+        $this->assertCount(2, $trend);
+        $this->assertSame('2026-07-10', $trend[0]['date']);
+        $this->assertSame(8, $trend[0]['new_reviews']);
+        $this->assertSame(6, $trend[0]['distribution'][5]);
+
+        $series = $svc->newReviewsStarSeries($place, '2026-07-01', '2026-07-31');
+        $this->assertSame(['2026-07-10', '2026-07-11'], $series['labels']);
+        $this->assertSame('5 bintang', $series['series'][0]['name']);
+        $this->assertSame([6, 3], $series['series'][0]['data']);
+        $this->assertSame('4 bintang', $series['series'][1]['name']);
+        $this->assertSame([1, 2], $series['series'][1]['data']);
     }
 }

@@ -137,6 +137,9 @@ class RatingStatistics extends Page implements HasForms
                 'snapshotTrend' => $service->snapshotTrend($place, $from, $to),
                 // Distribusi bintang per tanggal review (dari review tersimpan).
                 'dailyStars' => $service->dailyStarDistribution($place, $from, $to),
+                // Review BARU per hari + pecahan bintang (dari daily_review_stats).
+                'newReviews' => $service->newReviewsTrend($place, $from, $to),
+                'newReviewsStars' => $service->newReviewsStarSeries($place, $from, $to),
                 // Rekap mingguan/bulanan dari snapshot.
                 'recap' => $service->snapshotRecap($place, $from, $to, $this->recapGranularity),
                 'latestSnapshot' => $place->latestSnapshot(),

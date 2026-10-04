@@ -151,6 +151,12 @@ class Place extends Model
         return $this->hasMany(Review::class);
     }
 
+    /** @return HasMany<DailyReviewStat> */
+    public function dailyReviewStats(): HasMany
+    {
+        return $this->hasMany(DailyReviewStat::class);
+    }
+
     /**
      * Distribusi bintang (jumlah review per bintang 1..5) pada rentang tanggal.
      *

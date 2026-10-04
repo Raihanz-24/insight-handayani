@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Models\DailyReviewStat;
 use App\Models\Place;
 use App\Models\RatingSnapshot;
 use App\Models\Review;
@@ -11,6 +12,7 @@ use App\Models\SerpApiUsage;
 use App\Services\Analytics\RatingSyncService;
 use App\Services\SerpApi\QuotaGuard;
 use App\Services\SerpApi\SerpApiClient;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -125,6 +127,72 @@ class RatingSyncServiceTest extends TestCase
 
         // Tetap 1 meski diambil 2x (idempoten via review_key).
         $this->assertSame(1, Review::query()->where('place_id', $place->id)->count());
+    }
+
+    public function test_sync_records_daily_review_stats_with_star_breakdown(): void
+    {
+        Http::fake([
+            'serpapi.com/*' => Http::response([
+                'place_info' => ['title' => 'RM', 'rating' => 4.5, 'reviews' => 1000],
+                'reviews' => [
+                    ['rating' => 5.0, 'iso_date' => '2026-06-10T10:00:00Z', 'review_id' => 's5', 'user' => ['name' => 'A']],
+                    ['rating' => 5.0, 'iso_date' => '2026-06-09T10:00:00Z', 'review_id' => 's5b', 'user' => ['name' => 'B']],
+                    ['rating' => 2.0, 'iso_date' => '2026-06-08T10:00:00Z', 'review_id' => 's2', 'user' => ['name' => 'C']],
+                ],
+                'serpapi_pagination' => [],
+            ], 200),
+        ]);
+
+        $place = Place::factory()->fetchable()->create(['analysis_mode' => Place::MODE_MANUAL]);
+
+        $this->service()->syncPlace($place, withReviews: true);
+
+        $stat = DailyReviewStat::query()->where('place_id', $place->id)->first();
+
+        $this->assertNotNull($stat);
+        $this->assertSame(3, $stat->new_reviews);
+        $this->assertSame(2, $stat->star_5);
+        $this->assertSame(0, $stat->star_4);
+        $this->assertSame(1, $stat->star_2);
+        $this->assertSame(1000, $stat->total_reviews);
+        $this->assertSame(4.5, $stat->average_rating);
+        // Hari pertama → belum ada snapshot sebelumnya → delta null.
+        $this->assertNull($stat->reviews_delta);
+    }
+
+    public function test_daily_stats_compute_delta_from_previous_snapshot(): void
+    {
+        // Snapshot kemarin: 1000 ulasan.
+        RatingSnapshot::query()->create([
+            'place_id' => ($place = Place::factory()->fetchable()->create())->id,
+            'captured_at' => '2026-06-09 00:05:00',
+            'captured_date' => '2026-06-09',
+            'rating' => 4.5,
+            'reviews_count' => 1000,
+            'source' => RatingSnapshot::SOURCE_SERPAPI,
+            'status' => RatingSnapshot::STATUS_OK,
+        ]);
+
+        // Hari ini: 1007 ulasan → delta +7.
+        $snapshot = RatingSnapshot::query()->create([
+            'place_id' => $place->id,
+            'captured_at' => '2026-06-10 00:05:00',
+            'captured_date' => '2026-06-10',
+            'rating' => 4.6,
+            'reviews_count' => 1007,
+            'source' => RatingSnapshot::SOURCE_SERPAPI,
+            'status' => RatingSnapshot::STATUS_OK,
+        ]);
+
+        $stat = $this->service()->recordDailyStat(
+            $place,
+            CarbonImmutable::parse('2026-06-10 00:05:00'),
+            $snapshot,
+            [1 => 0, 2 => 0, 3 => 0, 4 => 1, 5 => 2],
+        );
+
+        $this->assertSame(3, $stat->new_reviews);
+        $this->assertSame(7, $stat->reviews_delta); // 1007 - 1000
     }
 
     public function test_quota_exhausted_blocks_fetch(): void
