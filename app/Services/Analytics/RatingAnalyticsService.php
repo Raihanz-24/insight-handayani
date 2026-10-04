@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Analytics;
 
 use App\Models\Place;
+use App\Models\RatingSnapshot;
 use App\Models\Review;
 use App\Services\Analytics\Dto\RatingPeriodReport;
 use Carbon\CarbonImmutable;
@@ -103,5 +104,136 @@ class RatingAnalyticsService
             ->all();
 
         return $rows ?? [];
+    }
+
+    /**
+     * Tren HARIAN dari SNAPSHOT (akurat): rating rata-rata & total ulasan
+     * untuk setiap tanggal capture dalam rentang.
+     *
+     * @return array<int, array{date: string, rating: ?float, reviews: ?int}> diurutkan menaik
+     */
+    public function snapshotTrend(Place $place, \DateTimeInterface|string $from, \DateTimeInterface|string $to): array
+    {
+        $fromDate = CarbonImmutable::parse($from)->toDateString();
+        $toDate = CarbonImmutable::parse($to)->toDateString();
+
+        return RatingSnapshot::query()
+            ->where('place_id', $place->id)
+            ->successful()
+            ->whereBetween('captured_date', [$fromDate, $toDate])
+            ->orderBy('captured_date')
+            ->get(['captured_date', 'rating', 'reviews_count'])
+            ->map(fn ($s): array => [
+                'date' => $s->captured_date->toDateString(),
+                'rating' => $s->rating,
+                'reviews' => $s->reviews_count,
+            ])
+            ->all();
+    }
+
+    /**
+     * Distribusi bintang PER HARI berdasarkan tanggal review (dari review tersimpan).
+     * Dipakai untuk grafik bertumpuk (stacked) jumlah orang per bintang per hari.
+     *
+     * @return array{sets: array<int, array<string, mixed>>, labels: array<int, string>, series: array<int, array<string, mixed>>}
+     */
+    public function dailyStarDistribution(Place $place, \DateTimeInterface|string $from, \DateTimeInterface|string $to): array
+    {
+        $fromDate = CarbonImmutable::parse($from)->toDateString();
+        $toDate = CarbonImmutable::parse($to)->toDateString();
+
+        $rows = Review::query()
+            ->where('place_id', $place->id)
+            ->whereBetween('review_date', [$fromDate, $toDate])
+            ->selectRaw('review_date as d, rating, COUNT(*) as total')
+            ->groupBy('d', 'rating')
+            ->orderBy('d')
+            ->get();
+
+        $labels = [];
+        $grid = [];
+
+        foreach ($rows as $row) {
+            $date = CarbonImmutable::parse($row->d)->toDateString();
+            $labels[$date] = true;
+            $grid[$date][(int) $row->rating] = (int) $row->total;
+        }
+
+        $labels = array_keys($labels);
+        sort($labels);
+
+        $series = [];
+        for ($star = 5; $star >= 1; $star--) {
+            $series[] = [
+                'name' => $star.' bintang',
+                'data' => array_map(fn (string $d): int => (int) ($grid[$d][$star] ?? 0), $labels),
+            ];
+        }
+
+        return ['labels' => $labels, 'series' => $series];
+    }
+
+    /**
+     * Rekap periode (minggu/bulan) dari snapshot: rating rata-rata & total ulasan
+     * pada akhir tiap bucket, serta pertambahan ulasan.
+     *
+     * @param  string  $granularity  'week' | 'month'
+     * @return array<int, array{key: string, label: string, rating: ?float, end_reviews: ?int, delta: int}>
+     */
+    public function snapshotRecap(Place $place, \DateTimeInterface|string $from, \DateTimeInterface|string $to, string $granularity = 'week'): array
+    {
+        $fromDate = CarbonImmutable::parse($from)->toDateString();
+        $toDate = CarbonImmutable::parse($to)->toDateString();
+
+        $snapshots = RatingSnapshot::query()
+            ->where('place_id', $place->id)
+            ->successful()
+            ->whereBetween('captured_date', [$fromDate, $toDate])
+            ->orderBy('captured_date')
+            ->get(['captured_date', 'rating', 'reviews_count']);
+
+        $buckets = [];
+
+        foreach ($snapshots as $s) {
+            $date = $s->captured_date;
+            $key = $granularity === 'week'
+                ? $date->copy()->startOfWeek(CarbonImmutable::MONDAY)->toDateString()
+                : $date->format('Y-m');
+
+            $buckets[$key] ??= [
+                'key' => $key,
+                'label' => $granularity === 'week'
+                    ? 'Minggu '.$date->copy()->startOfWeek(CarbonImmutable::MONDAY)->translatedFormat('d M')
+                    : $date->translatedFormat('F Y'),
+                'ratings' => [],
+                'reviews' => [],
+            ];
+
+            $buckets[$key]['ratings'][] = $s->rating;
+            $buckets[$key]['reviews'][] = $s->reviews_count;
+        }
+
+        $out = [];
+        $prevEnd = null;
+
+        foreach ($buckets as $b) {
+            $ratings = array_filter($b['ratings'], fn ($v) => $v !== null);
+            $reviewVals = array_filter($b['reviews'], fn ($v) => $v !== null);
+            $endReviews = $reviewVals === [] ? null : (int) end($reviewVals);
+
+            $out[] = [
+                'key' => $b['key'],
+                'label' => $b['label'],
+                'rating' => $ratings === [] ? null : round(array_sum($ratings) / count($ratings), 2),
+                'end_reviews' => $endReviews,
+                'delta' => ($endReviews !== null && $prevEnd !== null) ? $endReviews - $prevEnd : 0,
+            ];
+
+            if ($endReviews !== null) {
+                $prevEnd = $endReviews;
+            }
+        }
+
+        return $out;
     }
 }

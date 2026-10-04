@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\Place;
+use App\Models\RatingSnapshot;
 use App\Models\Review;
 use App\Services\Analytics\RatingAnalyticsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -78,5 +79,107 @@ class RatingAnalyticsServiceTest extends TestCase
 
         $this->assertSame(2, $trend['2026-06'] ?? null);
         $this->assertSame(3, $trend['2026-07'] ?? null);
+    }
+
+    // -----------------------------------------------------------------
+    // Tren dari snapshot harian (rating + total ulasan)
+    // -----------------------------------------------------------------
+
+    public function test_snapshot_trend_returns_rating_and_reviews_per_day(): void
+    {
+        $place = Place::factory()->create();
+
+        RatingSnapshot::query()->create([
+            'place_id' => $place->id,
+            'captured_at' => '2026-07-10 00:05:00',
+            'captured_date' => '2026-07-10',
+            'rating' => 4.6,
+            'reviews_count' => 3354,
+            'source' => RatingSnapshot::SOURCE_SERPAPI,
+            'status' => RatingSnapshot::STATUS_OK,
+        ]);
+
+        RatingSnapshot::query()->create([
+            'place_id' => $place->id,
+            'captured_at' => '2026-07-11 00:05:00',
+            'captured_date' => '2026-07-11',
+            'rating' => 4.7,
+            'reviews_count' => 3361,
+            'source' => RatingSnapshot::SOURCE_SERPAPI,
+            'status' => RatingSnapshot::STATUS_OK,
+        ]);
+
+        // Snapshot error (gagal) harus diabaikan.
+        RatingSnapshot::query()->create([
+            'place_id' => $place->id,
+            'captured_at' => '2026-07-12 00:05:00',
+            'captured_date' => '2026-07-12',
+            'rating' => null,
+            'reviews_count' => null,
+            'source' => RatingSnapshot::SOURCE_SERPAPI,
+            'status' => RatingSnapshot::STATUS_ERROR,
+            'error_message' => 'x',
+        ]);
+
+        $trend = app(RatingAnalyticsService::class)
+            ->snapshotTrend($place, '2026-07-01', '2026-07-31');
+
+        $this->assertCount(2, $trend);
+        $this->assertSame('2026-07-10', $trend[0]['date']);
+        $this->assertSame(4.6, $trend[0]['rating']);
+        $this->assertSame(3354, $trend[0]['reviews']);
+        $this->assertSame('2026-07-11', $trend[1]['date']);
+        $this->assertSame(4.7, $trend[1]['rating']);
+    }
+
+    public function test_daily_star_distribution_builds_stacked_series(): void
+    {
+        $place = Place::factory()->create();
+
+        Review::factory()->for($place)->stars(5)->onDate('2026-06-01')->count(2)->create();
+        Review::factory()->for($place)->stars(4)->onDate('2026-06-01')->create();
+        Review::factory()->for($place)->stars(5)->onDate('2026-06-02')->create();
+
+        $ds = app(RatingAnalyticsService::class)
+            ->dailyStarDistribution($place, '2026-06-01', '2026-06-30');
+
+        $this->assertSame(['2026-06-01', '2026-06-02'], $ds['labels']);
+
+        // Series pertama = bintang 5 → [2, 1]
+        $this->assertSame('5 bintang', $ds['series'][0]['name']);
+        $this->assertSame([2, 1], $ds['series'][0]['data']);
+
+        // Bintang 4 hanya di hari pertama → [1, 0]
+        $this->assertSame('4 bintang', $ds['series'][1]['name']);
+        $this->assertSame([1, 0], $ds['series'][1]['data']);
+    }
+
+    public function test_snapshot_recap_weekly_with_delta(): void
+    {
+        $place = Place::factory()->create();
+
+        // Minggu 1 (Senin 2026-07-06): 3354 → Minggu 2: 3361 (naik 7).
+        foreach ([['2026-07-07', 4.6, 3354], ['2026-07-09', 4.6, 3360], ['2026-07-14', 4.7, 3361]] as [$d, $r, $c]) {
+            RatingSnapshot::query()->create([
+                'place_id' => $place->id,
+                'captured_at' => $d.' 00:05:00',
+                'captured_date' => $d,
+                'rating' => $r,
+                'reviews_count' => $c,
+                'source' => RatingSnapshot::SOURCE_SERPAPI,
+                'status' => RatingSnapshot::STATUS_OK,
+            ]);
+        }
+
+        $recap = app(RatingAnalyticsService::class)
+            ->snapshotRecap($place, '2026-07-01', '2026-07-31', 'week');
+
+        $this->assertCount(2, $recap);
+        $this->assertSame('2026-07-06', $recap[0]['key']);
+        $this->assertSame(3360, $recap[0]['end_reviews']);
+        $this->assertSame(0, $recap[0]['delta']); // belum ada pembanding
+        $this->assertSame('2026-07-13', $recap[1]['key']);
+        $this->assertSame(3361, $recap[1]['end_reviews']);
+        $this->assertSame(1, $recap[1]['delta']); // 3361 - 3360
     }
 }

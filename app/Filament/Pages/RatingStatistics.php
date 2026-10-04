@@ -30,7 +30,7 @@ class RatingStatistics extends Page implements HasForms
 
     protected static ?string $navigationLabel = 'Statistik Rating';
 
-    protected static ?string $title = 'Statistik Rating Google Maps';
+    protected static ?string $title = 'Statistik & Tren Rating Google Maps';
 
     protected static ?int $navigationSort = 1;
 
@@ -38,6 +38,9 @@ class RatingStatistics extends Page implements HasForms
 
     /** @var array<string, mixed> */
     public ?array $data = [];
+
+    /** Granularitas rekap: 'week' (mingguan) atau 'month' (bulanan). */
+    public string $recapGranularity = 'week';
 
     public function mount(): void
     {
@@ -126,10 +129,17 @@ class RatingStatistics extends Page implements HasForms
 
         foreach ($places as $place) {
             $report = $service->reportForPlace($place, $from, $to);
+
             $reports[] = [
                 'place' => $place,
                 'report' => $report,
-                'trend' => $service->trendForPlace($place, $from, $to, 'day'),
+                // Tren akurat dari SNAPSHOT (rating & total ulasan per hari capture).
+                'snapshotTrend' => $service->snapshotTrend($place, $from, $to),
+                // Distribusi bintang per tanggal review (dari review tersimpan).
+                'dailyStars' => $service->dailyStarDistribution($place, $from, $to),
+                // Rekap mingguan/bulanan dari snapshot.
+                'recap' => $service->snapshotRecap($place, $from, $to, $this->recapGranularity),
+                'latestSnapshot' => $place->latestSnapshot(),
             ];
         }
 
@@ -137,7 +147,15 @@ class RatingStatistics extends Page implements HasForms
             'from' => $from,
             'to' => $to,
             'reports' => $reports,
+            'recapGranularity' => $this->recapGranularity,
         ];
+    }
+
+    public function setRecapGranularity(string $granularity): void
+    {
+        if (in_array($granularity, ['week', 'month'], true)) {
+            $this->recapGranularity = $granularity;
+        }
     }
 
     public function getMaxContentWidth(): MaxWidth|string|null
