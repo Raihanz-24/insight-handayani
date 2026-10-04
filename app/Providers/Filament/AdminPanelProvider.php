@@ -28,7 +28,7 @@ class AdminPanelProvider extends PanelProvider
         return $panel
             ->default()
             ->id('admin')
-            ->path('admin')
+            ->path(config('analytics.admin_path', 'admin'))
             ->login()
             ->brandName('Handayani Analytics')
             ->colors([

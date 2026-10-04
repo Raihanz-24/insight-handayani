@@ -17,6 +17,40 @@
 **Stack:** Laravel 12 + Filament 3.3.55 (satu ekosistem dengan Portal & Logistik).
 **Pengguna:** hanya admin internal (login Filament).
 
+### Status Implementasi (diperbarui)
+
+| Tahap | Isi | Status |
+|---|---|---|
+| 1 | Fondasi proyek (Laravel + Filament + DB + config) | ✅ Selesai |
+| 2 | Skema DB (places, guest_entries, rating_snapshots, serpapi_usage, reviews, role) | ✅ Selesai |
+| 3 | Integrasi SerpApi (`SerpApiClient`, `QuotaGuard`, `MapsLinkResolver`, `ReviewParser`) | ✅ Selesai *(diselaraskan dgn dokumentasi resmi — lihat §Integrasi SerpApi)* |
+| 4 | Layanan analitik (`RatingSyncService`, `RatingAnalyticsService` + DTO) | ✅ Selesai |
+| 5 | UI: Resource (Tempat, Kendaraan, Review, Pengguna) | ✅ Selesai |
+| 6 | UI: Halaman Statistik Rating & Kendaraan + widget dashboard (ApexCharts) | ✅ Selesai |
+| 7 | Kontrol akses 2 role (developer & user) + halaman Pengaturan Analisis | ✅ Selesai |
+| 8 | Panduan deploy (LiteSpeed/cPanel) | ✅ Selesai (`docs/PANDUAN_DEPLOY.md`) |
+| 9 | **Uji live SerpApi (butuh kunci asli)** | ⏸ Menunggu kunci di `.env` |
+
+**Tes:** 54 tes / 167 assertions hijau. Pint bersih.
+
+#### Integrasi SerpApi — catatan audit terhadap dokumentasi resmi
+
+Diperiksa terhadap <https://serpapi.com/google-maps-reviews-api>:
+
+- ✅ Endpoint, `engine=google_maps_reviews`, `data_id`/`place_id`, `hl`,
+  `sort_by=newestFirst`, paginasi `serpapi_pagination.next_page_token`,
+  `place_info.rating`/`reviews`, `reviews[].rating`/`iso_date`/`user.name` — sesuai.
+- 🔧 **Perbaikan 1 (hemat kuota):** halaman pertama kini mengembalikan review +
+  token lanjutan, sehingga `fetchReviews` **tidak lagi mengambil ulang halaman 1**
+  (sebelumnya membuang 1 search per sinkronisasi).
+- 🔧 **Perbaikan 2:** parameter `gl` **dihapus** (tidak didukung engine ini;
+  hanya `hl`).
+- 🔧 **Perbaikan 3:** halaman **lanjutan** mengirim `num=20` (docs: 1..20;
+  halaman pertama selalu 8 & `num` tidak boleh dikirim) → memangkas jumlah
+  request ±2×.
+- 🧪 Ditambah tes kontrak (`SerpApiContractTest`) yang memakai payload **persis**
+  sesuai contoh dokumentasi.
+
 ### Keputusan yang sudah disepakati
 
 | Item | Keputusan |

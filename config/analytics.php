@@ -27,6 +27,12 @@ return [
     'week_starts_on' => (int) env('ANALYTICS_WEEK_STARTS_ON', 1),
 
     /*
+    | Path panel admin Filament. Ubah ke nilai acak saat produksi agar tidak
+    | mudah ditebak (mis. hndy-analytics-8f2a). Default: admin.
+    */
+    'admin_path' => env('ANALYTICS_ADMIN_PATH', 'admin'),
+
+    /*
     | Apakah menyimpan review individual (selain rating + jumlah ulasan).
     | true  -> butuh kuota lebih & tabel `reviews` terisi.
     | false -> hanya snapshot rating + jumlah ulasan.
