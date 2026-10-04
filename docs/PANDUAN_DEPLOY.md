@@ -298,6 +298,11 @@ lewat `serpapi_data_id`/`name`, review lewat `place_id + review_key`, sehingga
 tidak menggandakan data. Statistik tempat (`reviews_synced`, tanggal) dihitung
 ulang otomatis.
 
+> Langkah lengkap (termasuk cara unggah file ke server) ada di
+> [`docs/CARA_PINDAH_DATA.md`](CARA_PINDAH_DATA.md). File data yang sudah
+> disiapkan: `storage/app/analytics-data-server.json` ( tidak ikut Git — unggah
+> manual ke server).
+
 ---
 
 ## 14. Checklist sebelum go-live
