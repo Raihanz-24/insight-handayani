@@ -129,6 +129,43 @@ class SerpApiClientTest extends TestCase
         $this->assertCount(3, $out['reviews']);
         $this->assertSame(2, $out['pages_fetched']);
         $this->assertSame([1, 1], $costs); // 2 search terpakai.
+
+        // Halaman lanjutan WAJIB kirim num (maks 20) untuk menghemat request.
+        Http::assertSent(fn (Request $req): bool => isset($req['next_page_token']) && (int) $req['num'] === 20);
+    }
+
+    public function test_fetch_reviews_resumes_from_initial_page_one_without_refetch(): void
+    {
+        // Halaman 1 sudah diambil (lewat fetchRating) → klien hanya mengambil
+        // halaman ke-2 dst, TIDAK mengulang halaman pertama.
+        Http::fake([
+            'serpapi.com/*' => Http::response([
+                'reviews' => [
+                    ['rating' => 4.0, 'iso_date' => '2026-06-05T10:00:00Z', 'review_id' => 'z', 'user' => ['name' => 'Z']],
+                ],
+                'serpapi_pagination' => [],
+            ], 200),
+        ]);
+
+        $costs = [];
+        $out = $this->client()->fetchReviews(
+            dataId: '0x1:0x2',
+            maxPages: 3,
+            onSearch: function (int $c) use (&$costs): void {
+                $costs[] = $c;
+            },
+            initialReviews: [
+                ['rating' => 5.0, 'iso_date' => '2026-06-10T10:00:00Z', 'review_id' => 'a', 'user' => ['name' => 'A']],
+            ],
+            initialToken: 'TOKEN1',
+        );
+
+        $this->assertTrue($out['success']);
+        $this->assertCount(2, $out['reviews']); // 1 dari halaman 1 + 1 dari halaman 2.
+        $this->assertSame(2, $out['pages_fetched']); // halaman 1 tetap dihitung.
+        $this->assertSame([1], $costs); // hanya 1 search baru terpakai.
+
+        Http::assertSent(fn (Request $req): bool => ($req['next_page_token'] ?? null) === 'TOKEN1');
     }
 
     public function test_fetch_reviews_respects_max_pages(): void

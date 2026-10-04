@@ -17,6 +17,10 @@ final class RatingResult
         public readonly int $pagesFetched = 0,
         public readonly ?string $error = null,
         public readonly array $meta = [],
+        /** @var array<int, array<string, mixed>> review dari halaman pertama */
+        public readonly array $reviews = [],
+        /** Token halaman berikutnya dari halaman pertama (bila ada). */
+        public readonly ?string $nextPageToken = null,
     ) {}
 
     public static function ok(
@@ -25,6 +29,8 @@ final class RatingResult
         ?string $placeTitle,
         int $pagesFetched,
         array $meta = [],
+        array $reviews = [],
+        ?string $nextPageToken = null,
     ): self {
         return new self(
             success: true,
@@ -33,6 +39,8 @@ final class RatingResult
             placeTitle: $placeTitle,
             pagesFetched: $pagesFetched,
             meta: $meta,
+            reviews: $reviews,
+            nextPageToken: $nextPageToken,
         );
     }
 

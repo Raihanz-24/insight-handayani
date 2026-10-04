@@ -26,7 +26,6 @@ class AppServiceProvider extends ServiceProvider
                 baseUrl: (string) config('serpapi.base_url'),
                 engine: (string) config('serpapi.engine'),
                 hl: (string) config('serpapi.hl'),
-                gl: (string) config('serpapi.gl'),
                 timeout: (int) config('serpapi.timeout'),
                 retry: (int) config('serpapi.retry'),
                 retryDelay: (int) config('serpapi.retry_delay'),

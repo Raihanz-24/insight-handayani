@@ -37,10 +37,10 @@ return [
     'retry_delay' => (int) env('SERPAPI_RETRY_DELAY', 500), // milidetik
 
     /*
-    | Bahasa & negara hasil.
+    | Bahasa hasil (hl). Catatan: engine `google_maps_reviews` TIDAK mendukung
+    | parameter `gl` (country) — hanya `hl`. Lihat dokumentasi SerpApi.
     */
     'hl' => env('SERPAPI_HL', 'id'),
-    'gl' => env('SERPAPI_GL', 'id'),
 
     /*
     | Batas pengaman kuota.

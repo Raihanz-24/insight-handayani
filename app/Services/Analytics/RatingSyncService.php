@@ -66,7 +66,14 @@ class RatingSyncService
         $snapshot = $this->store($place, $now, $result);
 
         if ($snapshot->status === RatingSnapshot::STATUS_OK && $withReviews) {
-            $this->syncReviews($place, $maxReviewPages);
+            // Halaman pertama sudah diambil lewat fetchRating → lanjutkan dari
+            // token-nya agar tidak memakai kuota ekstra (hemat 1 search).
+            $this->syncReviews(
+                $place,
+                $maxReviewPages,
+                initialReviews: $result->reviews,
+                initialToken: $result->nextPageToken,
+            );
         }
 
         return $snapshot;
@@ -75,10 +82,15 @@ class RatingSyncService
     /**
      * Ambil review individual (berhalaman) & simpan secara akumulatif.
      *
+     * @param  array<int, array<string, mixed>>  $initialReviews  review halaman 1 (bila sudah diambil)
      * @return int jumlah review BARU yang disimpan
      */
-    public function syncReviews(Place $place, ?int $maxReviewPages = null): int
-    {
+    public function syncReviews(
+        Place $place,
+        ?int $maxReviewPages = null,
+        array $initialReviews = [],
+        ?string $initialToken = null,
+    ): int {
         if (! $this->client->isConfigured() || ! $place->isFetchable()) {
             return 0;
         }
@@ -86,14 +98,15 @@ class RatingSyncService
         // Batasi jumlah halaman agar tidak melebihi sisa kuota hari ini.
         $remaining = $this->quota->remaining();
 
-        if ($remaining <= 0) {
+        if ($remaining <= 0 && $initialReviews === []) {
             return 0;
         }
 
-        $maxPages = min(
-            $maxReviewPages ?? (int) config('serpapi.reviews_max_pages', 3),
-            $remaining,
-        );
+        $requestedPages = $maxReviewPages ?? (int) config('serpapi.reviews_max_pages', 3);
+
+        // `maxPages` = total anggaran halaman (halaman 1 yang sudah diambil
+        // lewat fetchRating tetap dihitung 1 oleh klien).
+        $maxPages = min(max(1, $requestedPages), max(1, $remaining));
 
         $now = CarbonImmutable::now();
 
@@ -103,6 +116,8 @@ class RatingSyncService
             maxPages: $maxPages,
             sortBy: 'newestFirst',
             onSearch: fn (int $cost) => $this->quota->record($cost),
+            initialReviews: $initialReviews,
+            initialToken: $initialToken,
         );
 
         if (! $response['success'] || $response['reviews'] === []) {

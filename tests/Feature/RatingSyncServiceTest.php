@@ -80,18 +80,17 @@ class RatingSyncServiceTest extends TestCase
 
     public function test_sync_with_reviews_stores_individual_reviews(): void
     {
+        // Dengan perbaikan hemat kuota, review halaman pertama ikut pada respons
+        // fetchRating → hanya 1 request HTTP (bukan 2).
         Http::fake([
-            'serpapi.com/*' => Http::sequence()
-                // 1) Panggilan fetchRating.
-                ->push(['place_info' => ['title' => 'RM', 'rating' => 4.6, 'reviews' => 1591]], 200)
-                // 2) Panggilan fetchReviews (halaman pertama).
-                ->push([
-                    'reviews' => [
-                        ['rating' => 5.0, 'iso_date' => '2026-06-10T10:00:00Z', 'review_id' => 'a', 'user' => ['name' => 'A']],
-                        ['rating' => 3.0, 'iso_date' => '2026-06-09T10:00:00Z', 'review_id' => 'b', 'user' => ['name' => 'B']],
-                    ],
-                    'serpapi_pagination' => [],
-                ], 200),
+            'serpapi.com/*' => Http::response([
+                'place_info' => ['title' => 'RM', 'rating' => 4.6, 'reviews' => 1591],
+                'reviews' => [
+                    ['rating' => 5.0, 'iso_date' => '2026-06-10T10:00:00Z', 'review_id' => 'a', 'user' => ['name' => 'A']],
+                    ['rating' => 3.0, 'iso_date' => '2026-06-09T10:00:00Z', 'review_id' => 'b', 'user' => ['name' => 'B']],
+                ],
+                'serpapi_pagination' => [],
+            ], 200),
         ]);
 
         $place = Place::factory()->fetchable()->create(['analysis_mode' => Place::MODE_MANUAL]);
@@ -102,6 +101,10 @@ class RatingSyncServiceTest extends TestCase
         $this->assertSame(2, $place->fresh()->reviews_synced);
         $this->assertSame('2026-06-09', $place->fresh()->oldest_review_date->toDateString());
         $this->assertSame('2026-06-10', $place->fresh()->newest_review_date->toDateString());
+
+        // Hemat kuota: hanya 1 search (halaman 1 memuat rating + review sekaligus).
+        $this->assertSame(1, (int) SerpApiUsage::query()->value('searches'));
+        Http::assertSentCount(1);
     }
 
     public function test_sync_reviews_is_idempotent(): void

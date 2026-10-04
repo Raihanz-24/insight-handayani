@@ -21,12 +21,18 @@ use Throwable;
  */
 class SerpApiClient
 {
+    /**
+     * Jumlah hasil per halaman LANJUTAN (halaman pertama selalu 8 hasil dan
+     * `num` tidak boleh dikirim). Menurut dokumentasi SerpApi, `num` = 1..20.
+     * Memakai 20 di halaman lanjutan memangkas jumlah request (hemat kuota).
+     */
+    private const NUM_PER_PAGE = 20;
+
     public function __construct(
         private readonly ?string $apiKey = null,
         private readonly string $baseUrl = 'https://serpapi.com/search',
         private readonly string $engine = 'google_maps_reviews',
         private readonly string $hl = 'id',
-        private readonly string $gl = 'id',
         private readonly int $timeout = 20,
         private readonly int $retry = 2,
         private readonly int $retryDelay = 500,
@@ -42,7 +48,12 @@ class SerpApiClient
     }
 
     /**
-     * Ambil rating + jumlah ulasan untuk sebuah tempat.
+     * Ambil rating + jumlah ulasan untuk sebuah tempat (halaman pertama).
+     *
+     * Halaman pertama engine `google_maps_reviews` juga memuat ~8 review dan
+     * token halaman berikutnya. Keduanya dikembalikan lewat {@see RatingResult}
+     * agar pemanggil TIDAK perlu memanggil API lagi untuk halaman pertama
+     * (menghemat 1 search per sinkronisasi).
      *
      * @param  callable(int $cost): void|null  $onSearch  dipanggil setiap 1 search terpakai (untuk guard kuota).
      */
@@ -60,15 +71,14 @@ class SerpApiClient
         }
 
         $pages = 0;
-        $placeInfo = null;
 
         try {
-            // Ambil halaman pertama (cukup untuk place_info rating & reviews).
+            // Halaman pertama: cukup untuk `place_info` (rating + jumlah ulasan).
+            // Catatan: `num` TIDAK boleh dikirim di halaman pertama (selalu 8 hasil).
             $params = [
                 'engine' => $this->engine,
                 'api_key' => $this->apiKey,
                 'hl' => $this->hl,
-                'gl' => $this->gl,
             ];
 
             if (filled($dataId)) {
@@ -117,6 +127,8 @@ class SerpApiClient
                     'data_id' => $dataId,
                     'place_id' => $placeId,
                 ],
+                reviews: is_array($json['reviews'] ?? null) ? $json['reviews'] : [],
+                nextPageToken: $json['serpapi_pagination']['next_page_token'] ?? null,
             );
         } catch (Throwable $e) {
             return RatingResult::error('Exception: '.$e->getMessage(), $pages);
@@ -126,12 +138,17 @@ class SerpApiClient
     /**
      * Ambil daftar review berhalaman untuk sebuah tempat.
      *
-     * Mengembalikan review + info ulasan. Berhenti lebih awal bila:
+     * Mendukung "lanjutan" dari halaman pertama yang sudah diambil lewat
+     * {@see fetchRating()} (kirim `$initialReviews` + `$initialToken`) agar
+     * halaman pertama TIDAK diambil dua kali (hemat 1 search).
+     *
+     * Berhenti lebih awal bila:
      *  - mencapai `maxPages`,
      *  - halaman tidak punya token lanjutan,
      *  - `stopBeforeDate` diisi & halaman sudah memuat review lebih tua dari itu
      *    (berguna dengan sort_by=newestFirst agar hemat kuota).
      *
+     * @param  array<int, array<string, mixed>>  $initialReviews  review halaman 1 yang sudah didapat
      * @param  callable(int $cost): void|null  $onSearch
      * @return array{success: bool, reviews: array<int, array<string, mixed>>, place_info: ?array<string, mixed>, pages_fetched: int, error: ?string}
      */
@@ -142,6 +159,8 @@ class SerpApiClient
         string $sortBy = 'newestFirst',
         ?callable $onSearch = null,
         ?string $stopBeforeDate = null,
+        array $initialReviews = [],
+        ?string $initialToken = null,
     ): array {
         if (! $this->isConfigured()) {
             return $this->reviewsResult(false, [], null, 0, 'SERPAPI_KEY belum diatur.');
@@ -152,17 +171,32 @@ class SerpApiClient
         }
 
         $pages = 0;
-        $all = [];
+        $all = $initialReviews;
         $placeInfo = null;
-        $token = null;
+        $token = $initialToken;
+
+        // Halaman pertama sudah diambil pemanggil (lewat fetchRating) → hitung
+        // sebagai 1 halaman agar batas `maxPages` tetap konsisten.
+        $resumed = $initialReviews !== [] || $initialToken !== null;
+
+        if ($resumed) {
+            $pages = 1;
+        }
+
+        // Halaman 1 sudah didapat & tidak ada halaman lanjutan → tidak perlu
+        // request sama sekali (hemat kuota).
+        if ($resumed && $token === null) {
+            return $this->reviewsResult(true, $all, null, $pages, null);
+        }
 
         try {
             do {
+                // Tanpa token berarti halaman pertama belum diambil → ambil dari awal.
+                // Dengan token → halaman lanjutan, boleh kirim `num` (1..20).
                 $params = [
                     'engine' => $this->engine,
                     'api_key' => $this->apiKey,
                     'hl' => $this->hl,
-                    'gl' => $this->gl,
                     'sort_by' => $sortBy,
                 ];
 
@@ -174,6 +208,7 @@ class SerpApiClient
 
                 if ($token !== null) {
                     $params['next_page_token'] = $token;
+                    $params['num'] = self::NUM_PER_PAGE;
                 }
 
                 $response = $this->request($params);
