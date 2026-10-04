@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Models\Place;
 use App\Services\Analytics\RatingSyncService;
 use App\Services\SerpApi\QuotaGuard;
+use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 
 /**
@@ -21,7 +22,8 @@ class SnapshotRatingsCommand extends Command
     protected $signature = 'analytics:snapshot-ratings
                             {--force : Ambil untuk SEMUA tempat aktif (abaikan jadwal & mode off)}
                             {--place= : ID tempat tertentu saja}
-                            {--backfill : Tarik sebanyak mungkin review historis (sekali saja, borong kuota)}
+                            {--backfill : Tarik review historis (sekali saja, borong kuota)}
+                            {--days= : Batasi backfill hanya N hari terakhir (mis. 7)}
                             {--no-reviews : Jangan ambil review individual (hanya ringkasan rating)}';
 
     protected $description = 'Ambil snapshot rating + review Google Maps (via SerpApi) untuk tempat yang aktif.';
@@ -147,7 +149,13 @@ class SnapshotRatingsCommand extends Command
 
         $maxPages = (int) config('serpapi.reviews_max_pages_backfill', 100);
 
-        $this->warn("MODE BACKFILL: menarik sampai {$maxPages} halaman/tempat (borong kuota).");
+        // Batas tanggal bila --days diisi (mis. 7 hari terakhir).
+        $days = $this->option('days') !== null ? max(0, (int) $this->option('days')) : null;
+        $stopBefore = $days !== null ? CarbonImmutable::now()->subDays($days)->toDateString() : null;
+
+        $this->warn($days !== null
+            ? "MODE BACKFILL: {$days} hari terakhir, maks {$maxPages} halaman/tempat."
+            : "MODE BACKFILL: menarik sampai {$maxPages} halaman/tempat (borong kuota).");
 
         foreach ($places as $place) {
             $remaining = $quota->remaining();
@@ -158,7 +166,7 @@ class SnapshotRatingsCommand extends Command
                 break;
             }
 
-            $added = $sync->backfillReviews($place, min($maxPages, $remaining));
+            $added = $sync->backfillReviews($place, min($maxPages, $remaining), $stopBefore);
             $place->refresh();
 
             $this->line(sprintf(

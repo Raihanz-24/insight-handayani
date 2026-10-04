@@ -28,3 +28,5 @@ phpunit.mysql.xml
 .env
 .env.backup
 .env.*.bak
+.dev-server.pid
+/storage/app/analytics-export-*.json

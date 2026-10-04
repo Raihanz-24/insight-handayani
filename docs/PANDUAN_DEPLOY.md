@@ -258,9 +258,12 @@ php artisan up
 | `analytics:snapshot-ratings` | Ambil snapshot untuk tempat terjadwal yang due |
 | `analytics:snapshot-ratings --force` | Ambil untuk **semua** tempat aktif (abaikan jadwal/mode off) |
 | `analytics:snapshot-ratings --place=ID` | Ambil satu tempat saja |
-| `analytics:snapshot-ratings --backfill` | **Tarik history review sebanyak mungkin** (sekali saja; borong kuota) |
+| `analytics:snapshot-ratings --backfill` | **Tarik history review** (sekali saja; borong kuota) |
+| `analytics:snapshot-ratings --backfill --days=7` | Backfill **hanya N hari terakhir** (hemat kuota) |
 | `analytics:snapshot-ratings --no-reviews` | Hanya ringkasan rating (hemat kuota) |
 | `analytics:make-developer <email>` | Buat/jadikan user sebagai developer |
+| `analytics:export-data` | Ekspor data (places/reviews/snapshot/statistik) ke JSON |
+| `analytics:import-data --path=FILE` | Impor data dari JSON ke server (idempoten) |
 
 ### Catatan penting soal pengambilan review
 
@@ -271,9 +274,29 @@ php artisan up
 - **Sync harian** otomatis berhenti begitu menemukan review lebih tua dari
   (hari ini − `SERPAPI_STOP_BEFORE_BUFFER_DAYS`), jadi biasanya hanya
   **1–2 request/hari**.
-- **Backfill** (`--backfill`) menarik sebanyak mungkin history. Karena
-  memakai banyak kuota, jalankan saat kuota harian masih penuh dan tunggu
-  di hari berikutnya bila terputus (progress tersimpan, idempoten).
+- **Backfill** (`--backfill`) menarik history review. Karena memakai banyak
+  kuota, jalankan saat kuota harian masih penuh dan tunggu di hari berikutnya
+  bila terputus (progress tersimpan, idempoten). Gunakan `--days=N` untuk
+  membatasi hanya `N` hari terakhir (mis. `--days=7`).
+
+### Memindahkan data lokal → server (backfill)
+
+Data analitik disimpan di **database**, bukan di Git. Jadi setelah deploy &
+`migrate` di server, pindahkan datanya:
+
+```bash
+# DI LOKAL: ekspor data
+php artisan analytics:export-data
+# → storage/app/analytics-export-<tanggal>.json
+
+# Kirim file ke server (scp/SFTP), lalu DI SERVER:
+php artisan analytics:import-data --path=/path/analytics-export-<tanggal>.json
+```
+
+Impor bersifat **idempoten** (aman dijalankan berulang): `places` dicocokkan
+lewat `serpapi_data_id`/`name`, review lewat `place_id + review_key`, sehingga
+tidak menggandakan data. Statistik tempat (`reviews_synced`, tanggal) dihitung
+ulang otomatis.
 
 ---
 
@@ -289,3 +312,4 @@ php artisan up
 - [ ] Document root ke `public`; `public/storage` ada
 - [ ] Cache (`config`/`route`/`view`) sudah dibangun
 - [ ] Kuota SerpApi harian diset sesuai paket Anda
+- [ ] (Opsional) Data hasil backfill lokal sudah diimpor: `analytics:import-data`

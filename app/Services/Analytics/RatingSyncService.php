@@ -188,12 +188,12 @@ class RatingSyncService
     }
 
     /**
-     * Backfill: tarik sebanyak mungkin review historis (tanpa batas tanggal),
-     * sampai kehabisan token atau mencapai batas halaman.
+     * Backfill: tarik review historis sampai kehabisan token atau batas halaman.
      *
+     * @param  string|null  $stopBeforeDate  berhenti bila review lebih tua dari tanggal ini (mis. 7 hari lalu)
      * @return int jumlah review BARU yang tersimpan
      */
-    public function backfillReviews(Place $place, ?int $maxPages = null): int
+    public function backfillReviews(Place $place, ?int $maxPages = null, ?string $stopBeforeDate = null): int
     {
         if (! $this->client->isConfigured() || ! $place->isFetchable()) {
             return 0;
@@ -205,7 +205,7 @@ class RatingSyncService
 
         // Tidak pakai `initialReviews` → ambil dari halaman 1 (rating sudah
         // tersimpan terpisah bila perlu; backfill fokus review).
-        $this->syncReviews($place, $limit, stopBeforeDate: null);
+        $this->syncReviews($place, $limit, stopBeforeDate: $stopBeforeDate);
 
         $place->refresh();
 
