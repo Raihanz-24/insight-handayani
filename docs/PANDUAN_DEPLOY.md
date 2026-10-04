@@ -258,8 +258,22 @@ php artisan up
 | `analytics:snapshot-ratings` | Ambil snapshot untuk tempat terjadwal yang due |
 | `analytics:snapshot-ratings --force` | Ambil untuk **semua** tempat aktif (abaikan jadwal/mode off) |
 | `analytics:snapshot-ratings --place=ID` | Ambil satu tempat saja |
+| `analytics:snapshot-ratings --backfill` | **Tarik history review sebanyak mungkin** (sekali saja; borong kuota) |
 | `analytics:snapshot-ratings --no-reviews` | Hanya ringkasan rating (hemat kuota) |
 | `analytics:make-developer <email>` | Buat/jadikan user sebagai developer |
+
+### Catatan penting soal pengambilan review
+
+- **Halaman 1** review selalu berisi **8 review** (tidak bisa diubah).
+- **Halaman lanjutan** berisi hingga **20 review** (`num` 1–20).
+- Token halaman lanjutan bisa sangat panjang — Google menyediakan **ratusan**
+  review (untuk lokasi ini ratusan dari total ribuan).
+- **Sync harian** otomatis berhenti begitu menemukan review lebih tua dari
+  (hari ini − `SERPAPI_STOP_BEFORE_BUFFER_DAYS`), jadi biasanya hanya
+  **1–2 request/hari**.
+- **Backfill** (`--backfill`) menarik sebanyak mungkin history. Karena
+  memakai banyak kuota, jalankan saat kuota harian masih penuh dan tunggu
+  di hari berikutnya bila terputus (progress tersimpan, idempoten).
 
 ---
 
